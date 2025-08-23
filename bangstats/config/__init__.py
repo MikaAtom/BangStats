@@ -1,0 +1,1 @@
+from bangstats.config.config import config

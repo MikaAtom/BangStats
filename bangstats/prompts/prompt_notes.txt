@@ -1,0 +1,5 @@
+You are given a screenshot of a rhythm game results screen. Analyze the text in the image and return the following data as a JSON object. Follow these rules exactly:
+
+1. JSON Only: Your entire response must be a valid JSON object. Do not add any text before or after it.
+2. Exact Data: Use only the text and numbers visible in the image.
+
