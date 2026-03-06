@@ -115,6 +115,23 @@ class ValidationService:
                 best_ratio, best = r, n
         return best, best_ratio
 
+    def _find_best_song_candidate(
+        self,
+        target: str,
+        songs: List[Any],
+        threshold: Optional[float] = None,
+    ) -> Tuple[Optional[Any], float]:
+        threshold = threshold if threshold is not None else self.fuzzy_threshold
+        best_song = None
+        best_ratio = 0.0
+        for song in songs:
+            candidate_name = self._strip_name(song.name.get("en", ""))
+            ratio = SequenceMatcher(None, target, candidate_name).ratio()
+            if ratio >= threshold and ratio > best_ratio:
+                best_song = song
+                best_ratio = ratio
+        return best_song, best_ratio
+
     def _resolve_song(self, song_name: str, difficulty: str, total_notes: int):
         reasons: List[str] = []
         song = None
@@ -157,18 +174,18 @@ class ValidationService:
         if song:
             return song, None, reasons, confidence
 
-        possibles = self.song_service.get_songs_by_difficulty(difficulty, total_notes)
+        # NOTE: candidate search must be by note count + difficulty, not difficulty level.
+        possibles = self.song_service.get_songs_by_note_count(total_notes, difficulty)
         if not possibles:
             logger.warning(
                 f"Song not found: {song_name} ({difficulty}, {total_notes} notes)"
             )
             return None, "not_found_errors", reasons, 0.0
 
-        names = [self._strip_name(s.name.get("en", "")) for s in possibles]
-        _, fuzzy_ratio = self._find_similar_song(song_name, names)
-        if fuzzy_ratio > 0:
-            reasons.append("resolved_fuzzy_candidate_only")
-            return None, None, reasons, fuzzy_ratio
+        fuzzy_song, fuzzy_ratio = self._find_best_song_candidate(song_name, possibles)
+        if fuzzy_song is not None:
+            reasons.append("resolved_fuzzy_name")
+            return fuzzy_song, None, reasons, fuzzy_ratio
 
         logger.warning(
             f"Could not find similar song for {song_name} ({difficulty}, {total_notes} notes)"
@@ -176,7 +193,7 @@ class ValidationService:
         return None, "not_found_errors", reasons, 0.0
 
     def _derive_success_severity(self, reasons: List[str]) -> str:
-        if "accepted_known_note_exception" in reasons or "resolved_fuzzy_candidate_only" in reasons:
+        if "accepted_known_note_exception" in reasons or "resolved_fuzzy_name" in reasons:
             return "warning"
         return "info"
 

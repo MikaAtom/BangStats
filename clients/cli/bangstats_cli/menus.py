@@ -1,8 +1,27 @@
 from pathlib import Path
+from copy import deepcopy
+from typing import Any
 
 from bangstats_cli.api_client import BangStatsAPI
 
 SUPPORTED_SERVERS = ["en", "jp", "tw", "cn", "kr"]
+EDITABLE_SCAN_FIELDS = [
+    "song_name_from_top_bar_text",
+    "difficulty",
+    "live_type",
+    "perfect",
+    "great",
+    "good",
+    "bad",
+    "miss",
+    "fast",
+    "slow",
+    "max_combo",
+    "score",
+    "high_score",
+    "score_rank",
+    "is_new_record",
+]
 
 
 def user_login(
@@ -78,8 +97,53 @@ def scan_screenshots(
         return
 
     print(f"Found {len(images)} images in {screenshots_dir}.")
+    parallel_workers = None
+    keys_per_worker = None
+    try:
+        capabilities = api.get_scan_capabilities()
+    except Exception:
+        capabilities = {"provider": "unknown", "available_google_keys": 0}
+
+    provider = capabilities.get("provider")
+    available_keys = int(capabilities.get("available_google_keys", 0) or 0)
+    if provider == "gemini" and available_keys > 1:
+        enable_parallel = (
+            input(
+                f"Enable parallel scan? Available Google keys: {available_keys} (y/N): "
+            )
+            .strip()
+            .lower()
+        )
+        if enable_parallel in {"y", "yes"}:
+            print("Choose manual mode: workers x keys_per_worker")
+            print(
+                "Rule: workers * keys_per_worker must be <= available keys "
+                f"({available_keys})."
+            )
+            workers_raw = input("Workers: ").strip()
+            keys_raw = input("Keys per worker: ").strip()
+            try:
+                parsed_workers = int(workers_raw)
+                parsed_keys = int(keys_raw)
+                if parsed_workers <= 0 or parsed_keys <= 0:
+                    raise ValueError
+                if parsed_workers * parsed_keys > available_keys:
+                    raise ValueError
+                parallel_workers = parsed_workers
+                keys_per_worker = parsed_keys
+                print(
+                    f"Parallel mode enabled: {parallel_workers}x{keys_per_worker}"
+                )
+            except ValueError:
+                print("Invalid parallel mode; falling back to single-worker scan.")
+
     print("Starting scan...")
-    scan_result = api.scan_images(int(user["id"]), images)
+    scan_result = api.scan_images(
+        int(user["id"]),
+        images,
+        parallel_workers=parallel_workers,
+        keys_per_worker=keys_per_worker,
+    )
     print("Scan completed. Results:")
     print(f"Total images scanned: {scan_result.get('total_scanned', 0)}")
     print(f"Successful scans: {scan_result.get('successful', 0)}")
@@ -90,6 +154,269 @@ def scan_screenshots(
     print("Errors:")
     for error_type, count in scan_result.get("errors", {}).items():
         print(f"  {error_type.replace('_', ' ').title()}: {count}")
+    additional = scan_result.get("additional", {})
+    if additional:
+        print("Scan mode:")
+        print(f"  Provider: {additional.get('provider', '-')}")
+        if additional.get("parallel_enabled"):
+            print(f"  Parallel: {additional.get('mode', '-')}")
+        else:
+            print("  Parallel: disabled")
+
+
+def import_legacy_json(
+    api: BangStatsAPI,
+    user: dict,
+    json_folder_override: str | None = None,
+) -> None:
+    folder = json_folder_override or input("Enter legacy JSON folder path: ").strip()
+    if not folder:
+        print("JSON folder path cannot be empty.")
+        return
+
+    folder_path = Path(folder).expanduser()
+    if not folder_path.exists() or not folder_path.is_dir():
+        print(f"Path is not a directory: {folder_path}")
+        return
+
+    persist_choice = input("Persist valid records to DB? (Y/n): ").strip().lower()
+    persist_to_db = persist_choice not in {"n", "no"}
+
+    try:
+        result = api.import_json_folder(
+            user_id=int(user["id"]),
+            folder_path=str(folder_path),
+            persist_to_db=persist_to_db,
+        )
+    except Exception as exc:
+        print(f"Import failed: {exc}")
+        return
+
+    print("Import completed. Results:")
+    print(f"Total JSON processed: {result.get('total_scanned', 0)}")
+    print(f"Successful validations: {result.get('successful', 0)}")
+    print(f"Persisted to DB: {result.get('persisted', 0)}")
+    print(f"Failed to persist: {result.get('failed_to_persist', 0)}")
+    print(f"Skipped (duplicate): {result.get('skipped_duplicates', 0)}")
+    print("Errors:")
+    for error_type, count in result.get("errors", {}).items():
+        print(f"  {error_type.replace('_', ' ').title()}: {count}")
+
+
+def _coerce_value(raw_value: str, current_value: Any) -> Any:
+    if isinstance(current_value, bool):
+        return raw_value.strip().lower() in {"1", "true", "t", "yes", "y"}
+    if isinstance(current_value, int):
+        return int(raw_value.strip())
+    return raw_value
+
+
+def _pick_error_type(error_counts: dict[str, int]) -> str | None:
+    options = [(name, count) for name, count in error_counts.items() if count > 0]
+    if not options:
+        print("No error files available.")
+        return None
+
+    print("\nError categories:")
+    for idx, (name, count) in enumerate(options, start=1):
+        print(f"{idx}. {name} ({count})")
+    print("0. Back")
+
+    choice = input("Choose category: ").strip()
+    if choice == "0":
+        return None
+    if not choice.isdigit():
+        print("Invalid choice.")
+        return None
+
+    index = int(choice) - 1
+    if index < 0 or index >= len(options):
+        print("Invalid choice.")
+        return None
+    return options[index][0]
+
+
+def _pick_error_file(files: list[str]) -> str | None:
+    if not files:
+        print("No files in this category.")
+        return None
+
+    display = files[:50]
+    print("\nError files:")
+    for idx, name in enumerate(display, start=1):
+        print(f"{idx}. {name}")
+    if len(files) > len(display):
+        print(f"... showing first {len(display)} of {len(files)}")
+    print("0. Back")
+
+    choice = input("Choose file: ").strip()
+    if choice == "0":
+        return None
+    if not choice.isdigit():
+        print("Invalid choice.")
+        return None
+
+    index = int(choice) - 1
+    if index < 0 or index >= len(display):
+        print("Invalid choice.")
+        return None
+    return display[index]
+
+
+def _edit_scan_payload(scan_data: dict[str, Any]) -> dict[str, Any]:
+    updated = deepcopy(scan_data)
+    while True:
+        print("\nEditable fields:")
+        for idx, field in enumerate(EDITABLE_SCAN_FIELDS, start=1):
+            print(f"{idx}. {field}: {updated.get(field)}")
+        print("S. Submit correction")
+        print("Q. Cancel")
+
+        choice = input("Select field to edit: ").strip().lower()
+        if choice == "s":
+            return updated
+        if choice == "q":
+            return scan_data
+        if not choice.isdigit():
+            print("Invalid choice.")
+            continue
+
+        index = int(choice) - 1
+        if index < 0 or index >= len(EDITABLE_SCAN_FIELDS):
+            print("Invalid choice.")
+            continue
+        field = EDITABLE_SCAN_FIELDS[index]
+        current_value = updated.get(field)
+        raw_value = input(f"New value for {field} (current={current_value}): ")
+        try:
+            updated[field] = _coerce_value(raw_value, current_value)
+        except ValueError as exc:
+            print(f"Invalid value: {exc}")
+
+
+def _print_category_action_result(result: dict[str, Any]) -> None:
+    print("Batch action completed:")
+    print(f"  Total files: {result.get('total_files', 0)}")
+    print(f"  Processed: {result.get('processed', 0)}")
+    print(f"  Successful: {result.get('successful', 0)}")
+    print(f"  Persisted: {result.get('persisted', 0)}")
+    print(f"  Skipped duplicate: {result.get('skipped_duplicates', 0)}")
+    print(f"  Failed to persist: {result.get('failed_to_persist', 0)}")
+    print(f"  Missing image: {result.get('missing_image', 0)}")
+    print(f"  Scan failed: {result.get('scan_failed', 0)}")
+    errors = result.get("errors", {})
+    if errors:
+        print("  Errors by type:")
+        for error_type, count in errors.items():
+            print(f"    {error_type}: {count}")
+
+
+def error_correction_menu(api: BangStatsAPI, user: dict) -> None:
+    while True:
+        try:
+            summary = api.list_scan_errors()
+        except Exception as exc:
+            print(f"Failed to fetch error list: {exc}")
+            return
+
+        print(f"\nTotal unresolved error files: {summary.get('total', 0)}")
+        error_type = _pick_error_type(summary.get("errors", {}))
+        if not error_type:
+            return
+
+        files = summary.get("error_files", {}).get(error_type, [])
+        print("\nCategory actions:")
+        print("1. Review and correct single file")
+        print("2. Revalidate whole category")
+        print("3. Rescan whole category (needs images in cache)")
+        print("0. Back")
+        action = input("Choose action: ").strip()
+        if action == "0":
+            continue
+        if action == "2":
+            interval_raw = input("Progress update every N files? [500]: ").strip()
+            try:
+                progress_every = int(interval_raw) if interval_raw else 500
+                if progress_every <= 0:
+                    raise ValueError
+            except ValueError:
+                print("Invalid progress interval. Using default 500.")
+                progress_every = 500
+            try:
+                result = api.revalidate_error_category(
+                    user_id=int(user["id"]),
+                    error_type=error_type,
+                    persist_to_db=True,
+                    progress_every=progress_every,
+                )
+                _print_category_action_result(result)
+            except Exception as exc:
+                print(f"Revalidate failed: {exc}")
+            continue
+        if action == "3":
+            interval_raw = input("Progress update every N files? [500]: ").strip()
+            try:
+                progress_every = int(interval_raw) if interval_raw else 500
+                if progress_every <= 0:
+                    raise ValueError
+            except ValueError:
+                print("Invalid progress interval. Using default 500.")
+                progress_every = 500
+            model = input("OCR model override (blank for default): ").strip() or None
+            try:
+                result = api.rescan_error_category(
+                    user_id=int(user["id"]),
+                    error_type=error_type,
+                    persist_to_db=True,
+                    progress_every=progress_every,
+                    model=model,
+                )
+                _print_category_action_result(result)
+            except Exception as exc:
+                print(f"Rescan failed: {exc}")
+            continue
+        if action != "1":
+            print("Invalid choice.")
+            continue
+
+        json_filename = _pick_error_file(files)
+        if not json_filename:
+            continue
+
+        try:
+            detail = api.get_scan_error_detail(error_type, json_filename)
+        except Exception as exc:
+            print(f"Failed to load error detail: {exc}")
+            continue
+
+        print(f"\nSelected: {detail.get('json_filename')}")
+        validation = detail.get("validation") or {}
+        print(f"Current error type: {validation.get('error_type', detail.get('error_type'))}")
+        if validation.get("reasons"):
+            print(f"Reasons: {', '.join(validation.get('reasons', []))}")
+        edited_payload = _edit_scan_payload(detail.get("scan_data", {}))
+        if edited_payload == detail.get("scan_data", {}):
+            print("No changes submitted.")
+            continue
+
+        try:
+            outcome = api.correct_scan_error(
+                user_id=int(user["id"]),
+                error_type=error_type,
+                json_filename=json_filename,
+                corrected_scan_data=edited_payload,
+                persist_to_db=True,
+            )
+        except Exception as exc:
+            print(f"Correction failed: {exc}")
+            continue
+
+        print("Correction processed:")
+        print(f"  Valid now: {outcome.get('is_valid')}")
+        print(f"  New error type: {outcome.get('error_type')}")
+        print(f"  Persisted: {outcome.get('persisted')}")
+        print(f"  Skipped duplicate: {outcome.get('skipped_duplicates')}")
+        print(f"  Failed to persist: {outcome.get('failed_to_persist')}")
 
 
 def view_stats(api: BangStatsAPI, user: dict) -> None:

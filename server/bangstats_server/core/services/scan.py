@@ -3,6 +3,8 @@ import re
 import json
 import shutil
 import datetime
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from loguru import logger
 from typing import List, Dict, Any, Optional
 
@@ -22,6 +24,8 @@ from bangstats_server.core.config import (
 )
 from bangstats_server.core.scripts.prompt_generate import prompt_generate
 from bangstats_server.core.adapters.ocr import get_ocr_service
+from bangstats_server.core.adapters.ocr.gemini import GoogleModelService
+from bangstats_server.core.config import GOOGLE_API_KEY
 
 from bangstats_server.core.services.event import EventService
 from bangstats_server.core.services.screenshot import ScreenshotService
@@ -51,9 +55,26 @@ class ScanService:
         self.event_service = EventService()
         self.screenshot_service = ScreenshotService()
         self.ocr_provider = OCR_PROVIDER
-        self.ocr_service = get_ocr_service(self.ocr_provider)
+        self.ocr_service = None
+        self._ocr_init_error: Optional[str] = None
+        try:
+            self.ocr_service = get_ocr_service(self.ocr_provider)
+        except Exception as exc:
+            # OCR is required only for image scanning, not for JSON import/correction.
+            self._ocr_init_error = str(exc)
+            logger.warning(f"OCR service unavailable at startup: {exc}")
         self.default_model = GEMINI_MODEL if self.ocr_provider == "gemini" else OLLAMA_MODEL
         self.validation_service = ValidationService()
+
+    def _get_available_google_keys(self) -> List[str]:
+        raw = GOOGLE_API_KEY
+        return [k.strip() for k in raw.split(",") if k.strip()]
+
+    def get_scan_capabilities(self) -> Dict[str, Any]:
+        return {
+            "provider": self.ocr_provider,
+            "available_google_keys": len(self._get_available_google_keys()),
+        }
 
     def _setup_cache_structure(self):
         """Setup cache folder structure."""
@@ -72,10 +93,26 @@ class ScanService:
         logger.debug("Cache structure setup complete")
 
     def _scan_single_image(
-        self, image_path: str, model: str
+        self,
+        image_path: str,
+        model: str,
+        ocr_service_override: Any = None,
     ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
         """Scan a single image using AI model."""
         try:
+            active_ocr_service = ocr_service_override or self.ocr_service
+            if active_ocr_service is None:
+                try:
+                    self.ocr_service = get_ocr_service(self.ocr_provider)
+                    self._ocr_init_error = None
+                    active_ocr_service = self.ocr_service
+                except Exception as exc:
+                    message = str(exc)
+                    self._ocr_init_error = message
+                    if "GOOGLE_API_KEY is not set" in message:
+                        return None, "GOOGLE_API_KEY not configured"
+                    return None, f"OCR unavailable: {message}"
+
             # Extract timestamp from filename for event context
             filename = os.path.basename(image_path)
             timestamp = self._extract_timestamp_from_filename(filename)
@@ -84,7 +121,7 @@ class ScanService:
             prompt = self._generate_prompt_for_timestamp(timestamp)
 
             # Use AI model to scan image
-            response = self.ocr_service.generate_response(model, prompt, image_path)
+            response = active_ocr_service.generate_response(model, prompt, image_path)
 
             if not response:
                 logger.warning(f"Empty response for image: {filename}")
@@ -136,7 +173,7 @@ class ScanService:
     def _store_result(
         self,
         filename: str,
-        image_path: str,
+        image_path: Optional[str],
         scan_result: Dict[str, Any],
         error_type: Optional[str],
     ) -> str:
@@ -144,9 +181,11 @@ class ScanService:
         # Determine target folder
         if error_type:
             target_folder = os.path.join(self.cache_errors, error_type)
-            # Copy image to target folder
-            target_image_path = os.path.join(target_folder, filename)
-            shutil.copy2(image_path, target_image_path)
+            os.makedirs(target_folder, exist_ok=True)
+            # Copy image to target folder when source image exists
+            if image_path and os.path.exists(image_path):
+                target_image_path = os.path.join(target_folder, filename)
+                shutil.copy2(image_path, target_image_path)
         else:
             target_folder = self.cache_successful
 
@@ -159,6 +198,552 @@ class ScanService:
 
         logger.debug(f"Stored result for {filename} in {target_folder}")
         return str(target_folder)
+
+    def _init_results(self) -> Dict[str, Any]:
+        return {
+            "total_scanned": 0,
+            "successful": 0,
+            "errors": {
+                "note_errors": 0,
+                "not_found_errors": 0,
+                "fast_slow_errors": 0,
+                "max_combo_errors": 0,
+                "live_errors": 0,
+                "validation_errors": 0,
+            },
+            "error_files": {
+                "note_errors": [],
+                "not_found_errors": [],
+                "fast_slow_errors": [],
+                "max_combo_errors": [],
+                "live_errors": [],
+                "validation_errors": [],
+            },
+            "error_rate": 0.0,
+            "validated": 0,
+            "persisted": 0,
+            "failed_to_persist": 0,
+            "skipped_duplicates": 0,
+        }
+
+    def _split_image_list(self, image_list: List[str], workers: int) -> List[List[str]]:
+        if workers <= 0:
+            return []
+        n = len(image_list)
+        base = n // workers
+        rem = n % workers
+        chunks: List[List[str]] = []
+        cursor = 0
+        for idx in range(workers):
+            size = base + (1 if idx < rem else 0)
+            chunks.append(image_list[cursor : cursor + size])
+            cursor += size
+        return [chunk for chunk in chunks if chunk]
+
+    def _validate_parallel_mode(
+        self,
+        *,
+        parallel_workers: int,
+        keys_per_worker: int,
+    ) -> List[str]:
+        if self.ocr_provider != "gemini":
+            raise ValueError("Parallel key mode is supported only for OCR_PROVIDER=gemini.")
+
+        if parallel_workers <= 0 or keys_per_worker <= 0:
+            raise ValueError("parallel_workers and keys_per_worker must be positive integers.")
+
+        available_keys = self._get_available_google_keys()
+        if not available_keys:
+            raise ValueError("No Google API keys available for parallel scanning.")
+
+        requested_total = parallel_workers * keys_per_worker
+        if requested_total > len(available_keys):
+            raise ValueError(
+                f"Requested {requested_total} keys ({parallel_workers}x{keys_per_worker}) "
+                f"but only {len(available_keys)} keys available."
+            )
+        return available_keys[:requested_total]
+
+    def _scan_images_worker(
+        self,
+        *,
+        images_folder: str,
+        image_list: List[str],
+        model: str,
+        user_id: Optional[int],
+        persist_to_db: bool,
+        worker_keys: List[str],
+    ) -> Dict[str, Any]:
+        worker_service = ScanService()
+        worker_service.ocr_service = GoogleModelService(api_keys=worker_keys)
+        worker_service._ocr_init_error = None
+        return worker_service.scan_images(
+            images_folder=images_folder,
+            image_list=image_list,
+            model=model,
+            user_id=user_id,
+            persist_to_db=persist_to_db,
+        )
+
+    def _merge_scan_results(self, target: Dict[str, Any], source: Dict[str, Any]) -> None:
+        scalar_keys = [
+            "total_scanned",
+            "successful",
+            "validated",
+            "persisted",
+            "failed_to_persist",
+            "skipped_duplicates",
+        ]
+        for key in scalar_keys:
+            target[key] += source.get(key, 0)
+
+        for err_type, count in source.get("errors", {}).items():
+            target["errors"].setdefault(err_type, 0)
+            target["errors"][err_type] += count
+
+        for err_type, files in source.get("error_files", {}).items():
+            target["error_files"].setdefault(err_type, [])
+            target["error_files"][err_type].extend(files)
+
+    def _canonical_image_filename(self, source_filename: str) -> str:
+        return f"{Path(source_filename).stem}.png"
+
+    def _list_error_json_paths(self, error_type: str) -> List[Path]:
+        error_dir = Path(self.cache_errors) / error_type
+        if not error_dir.exists() or not error_dir.is_dir():
+            return []
+        return sorted(
+            [
+                path
+                for path in error_dir.glob("*.json")
+                if path.is_file() and not path.name.endswith(".validation.json")
+            ]
+        )
+
+    def _find_error_image_path(self, error_type: str, json_filename: str) -> Optional[Path]:
+        error_dir = Path(self.cache_errors) / error_type
+        stem = Path(json_filename).stem
+        candidates = [
+            error_dir / f"{stem}.png",
+            error_dir / f"{stem}.jpg",
+            error_dir / f"{stem}.jpeg",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _persist_validated_payload(
+        self,
+        *,
+        user_id: int,
+        image_filename: str,
+        payload: Dict[str, Any],
+        validation_output: Any,
+    ) -> Dict[str, bool]:
+        result = {
+            "persisted": False,
+            "skipped_duplicates": False,
+            "failed_to_persist": False,
+        }
+        resolved_song_id = self._extract_resolved_song_id(validation_output)
+        if resolved_song_id is None:
+            result["failed_to_persist"] = True
+            return result
+        try:
+            timestamp_ms = self._extract_timestamp_from_filename(image_filename)
+            screenshot_payload = self._build_screenshot_payload(
+                user_id=user_id,
+                filename=image_filename,
+                scan_result=payload,
+                resolved_song_id=resolved_song_id,
+                timestamp_ms=timestamp_ms,
+            )
+            created = self.screenshot_service.create_screenshot(screenshot_payload)
+            if created is None:
+                result["skipped_duplicates"] = True
+            else:
+                result["persisted"] = True
+        except Exception as exc:
+            logger.error(f"Failed to persist validated payload for {image_filename}: {exc}")
+            result["failed_to_persist"] = True
+        return result
+
+    def _init_category_action_results(self, total_files: int) -> Dict[str, Any]:
+        return {
+            "total_files": total_files,
+            "processed": 0,
+            "successful": 0,
+            "persisted": 0,
+            "skipped_duplicates": 0,
+            "failed_to_persist": 0,
+            "missing_image": 0,
+            "scan_failed": 0,
+            "errors": {},
+        }
+
+    def _remove_error_entry(self, error_type: str, json_filename: str) -> None:
+        error_dir = Path(self.cache_errors) / error_type
+        json_path = error_dir / json_filename
+        validation_path = error_dir / f"{Path(json_filename).stem}.validation.json"
+        image_candidates = [
+            error_dir / f"{Path(json_filename).stem}.png",
+            error_dir / f"{Path(json_filename).stem}.jpg",
+            error_dir / f"{Path(json_filename).stem}.jpeg",
+        ]
+
+        for candidate in [json_path, validation_path, *image_candidates]:
+            if candidate.exists():
+                candidate.unlink()
+
+    def _resolve_error_json_path(self, error_type: str, json_filename: str) -> Path:
+        if not error_type:
+            raise ValueError("error_type is required")
+        filename = Path(json_filename).name
+        if not filename.endswith(".json"):
+            filename = f"{Path(filename).stem}.json"
+        path = Path(self.cache_errors) / error_type / filename
+        if not path.exists():
+            raise FileNotFoundError(f"Error JSON not found: {path}")
+        return path
+
+    def list_error_files(self) -> Dict[str, Any]:
+        errors_root = Path(self.cache_errors)
+        summary: Dict[str, int] = {}
+        files: Dict[str, List[str]] = {}
+        total = 0
+
+        if not errors_root.exists():
+            return {"total": 0, "errors": summary, "error_files": files}
+
+        for error_dir in sorted([p for p in errors_root.iterdir() if p.is_dir()]):
+            names = sorted(
+                [
+                    path.name
+                    for path in error_dir.glob("*.json")
+                    if not path.name.endswith(".validation.json")
+                ]
+            )
+            summary[error_dir.name] = len(names)
+            files[error_dir.name] = names
+            total += len(names)
+
+        return {"total": total, "errors": summary, "error_files": files}
+
+    def get_error_detail(self, error_type: str, json_filename: str) -> Dict[str, Any]:
+        json_path = self._resolve_error_json_path(error_type, json_filename)
+        validation_path = json_path.with_name(f"{json_path.stem}.validation.json")
+
+        with open(json_path, "r", encoding="utf-8") as fh:
+            scan_data = json.load(fh)
+
+        validation_data = None
+        if validation_path.exists():
+            with open(validation_path, "r", encoding="utf-8") as fh:
+                validation_data = json.load(fh)
+
+        return {
+            "error_type": error_type,
+            "json_filename": json_path.name,
+            "image_filename": self._canonical_image_filename(json_path.name),
+            "scan_data": scan_data,
+            "validation": validation_data,
+        }
+
+    def correct_error_file(
+        self,
+        *,
+        user_id: int,
+        error_type: str,
+        json_filename: str,
+        corrected_scan_data: Dict[str, Any],
+        persist_to_db: bool = True,
+    ) -> Dict[str, Any]:
+        json_path = self._resolve_error_json_path(error_type, json_filename)
+        canonical_filename = self._canonical_image_filename(json_path.name)
+        validation_output = self.validation_service.validate(canonical_filename, corrected_scan_data)
+        new_error_type = self._extract_error_type(validation_output)
+
+        # Remove stale entry before rewriting it to the latest category.
+        self._remove_error_entry(error_type, json_path.name)
+        target_folder = self._store_result(
+            filename=canonical_filename,
+            image_path=None,
+            scan_result=corrected_scan_data,
+            error_type=new_error_type,
+        )
+        self._store_validation_artifact(canonical_filename, target_folder, validation_output)
+
+        persisted = False
+        skipped_duplicate = False
+        failed_to_persist = False
+        resolved_song_id = self._extract_resolved_song_id(validation_output)
+        if new_error_type is None and persist_to_db:
+            if resolved_song_id is None:
+                failed_to_persist = True
+            else:
+                try:
+                    timestamp_ms = self._extract_timestamp_from_filename(canonical_filename)
+                    payload = self._build_screenshot_payload(
+                        user_id=user_id,
+                        filename=canonical_filename,
+                        scan_result=corrected_scan_data,
+                        resolved_song_id=resolved_song_id,
+                        timestamp_ms=timestamp_ms,
+                    )
+                    created = self.screenshot_service.create_screenshot(payload)
+                    if created is None:
+                        skipped_duplicate = True
+                    else:
+                        persisted = True
+                except Exception:
+                    failed_to_persist = True
+
+        return {
+            "image_filename": canonical_filename,
+            "is_valid": new_error_type is None,
+            "error_type": new_error_type,
+            "persisted": persisted,
+            "skipped_duplicates": skipped_duplicate,
+            "failed_to_persist": failed_to_persist,
+        }
+
+    def revalidate_error_category(
+        self,
+        *,
+        user_id: int,
+        error_type: str,
+        persist_to_db: bool = True,
+        progress_every: int = 500,
+    ) -> Dict[str, Any]:
+        if progress_every <= 0:
+            raise ValueError("progress_every must be greater than 0")
+
+        json_files = self._list_error_json_paths(error_type)
+        results = self._init_category_action_results(total_files=len(json_files))
+
+        for json_path in json_files:
+            try:
+                with open(json_path, "r", encoding="utf-8") as fh:
+                    payload = json.load(fh)
+                if not isinstance(payload, dict):
+                    raise ValueError("JSON payload must be an object")
+            except Exception as exc:
+                logger.warning(f"Failed to load error JSON {json_path.name}: {exc}")
+                results["processed"] += 1
+                results["errors"]["validation_errors"] = (
+                    results["errors"].get("validation_errors", 0) + 1
+                )
+                continue
+
+            image_filename = self._canonical_image_filename(json_path.name)
+            validation_output = self.validation_service.validate(image_filename, payload)
+            new_error_type = self._extract_error_type(validation_output)
+
+            self._remove_error_entry(error_type, json_path.name)
+            target_folder = self._store_result(
+                filename=image_filename,
+                image_path=None,
+                scan_result=payload,
+                error_type=new_error_type,
+            )
+            self._store_validation_artifact(image_filename, target_folder, validation_output)
+
+            results["processed"] += 1
+            if new_error_type is None:
+                results["successful"] += 1
+                if persist_to_db:
+                    persist_result = self._persist_validated_payload(
+                        user_id=user_id,
+                        image_filename=image_filename,
+                        payload=payload,
+                        validation_output=validation_output,
+                    )
+                    if persist_result["persisted"]:
+                        results["persisted"] += 1
+                    if persist_result["skipped_duplicates"]:
+                        results["skipped_duplicates"] += 1
+                    if persist_result["failed_to_persist"]:
+                        results["failed_to_persist"] += 1
+            else:
+                results["errors"][new_error_type] = results["errors"].get(new_error_type, 0) + 1
+
+            if results["processed"] % progress_every == 0:
+                print(f"Revalidate progress: {results['processed']}/{results['total_files']}")
+
+        return results
+
+    def rescan_error_category(
+        self,
+        *,
+        user_id: int,
+        error_type: str,
+        persist_to_db: bool = True,
+        progress_every: int = 500,
+        model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if progress_every <= 0:
+            raise ValueError("progress_every must be greater than 0")
+
+        json_files = self._list_error_json_paths(error_type)
+        results = self._init_category_action_results(total_files=len(json_files))
+        selected_model = model or self.default_model
+
+        for json_path in json_files:
+            image_filename = self._canonical_image_filename(json_path.name)
+            image_path = self._find_error_image_path(error_type, json_path.name)
+            if image_path is None:
+                results["processed"] += 1
+                results["missing_image"] += 1
+                if results["processed"] % progress_every == 0:
+                    print(f"Rescan progress: {results['processed']}/{results['total_files']}")
+                continue
+
+            scan_result, scan_error = self._scan_single_image(str(image_path), selected_model)
+            if not scan_result:
+                logger.warning(f"Failed to rescan {image_filename}: {scan_error or 'unknown error'}")
+                results["processed"] += 1
+                results["scan_failed"] += 1
+                if results["processed"] % progress_every == 0:
+                    print(f"Rescan progress: {results['processed']}/{results['total_files']}")
+                continue
+
+            validation_output = self.validation_service.validate(image_filename, scan_result)
+            new_error_type = self._extract_error_type(validation_output)
+
+            target_folder = self._store_result(
+                filename=image_filename,
+                image_path=str(image_path),
+                scan_result=scan_result,
+                error_type=new_error_type,
+            )
+            self._store_validation_artifact(image_filename, target_folder, validation_output)
+            if new_error_type != error_type:
+                self._remove_error_entry(error_type, json_path.name)
+
+            results["processed"] += 1
+            if new_error_type is None:
+                results["successful"] += 1
+                if persist_to_db:
+                    persist_result = self._persist_validated_payload(
+                        user_id=user_id,
+                        image_filename=image_filename,
+                        payload=scan_result,
+                        validation_output=validation_output,
+                    )
+                    if persist_result["persisted"]:
+                        results["persisted"] += 1
+                    if persist_result["skipped_duplicates"]:
+                        results["skipped_duplicates"] += 1
+                    if persist_result["failed_to_persist"]:
+                        results["failed_to_persist"] += 1
+            else:
+                results["errors"][new_error_type] = results["errors"].get(new_error_type, 0) + 1
+
+            if results["processed"] % progress_every == 0:
+                print(f"Rescan progress: {results['processed']}/{results['total_files']}")
+
+        return results
+
+    def import_json_folder(
+        self,
+        *,
+        folder_path: str,
+        user_id: int,
+        persist_to_db: bool = True,
+    ) -> Dict[str, Any]:
+        source = Path(folder_path).expanduser()
+        if not source.exists() or not source.is_dir():
+            raise ValueError(f"JSON folder does not exist: {source}")
+
+        json_files = sorted(
+            [
+                path
+                for path in source.glob("*.json")
+                if path.is_file() and not path.name.endswith(".validation.json")
+            ]
+        )
+        results = self._init_results()
+        logger.info(
+            "Starting JSON import for {} files from {}",
+            len(json_files),
+            source,
+        )
+
+        for json_file in json_files:
+            try:
+                with open(json_file, "r", encoding="utf-8") as fh:
+                    payload = json.load(fh)
+                if not isinstance(payload, dict):
+                    raise ValueError("JSON payload must be an object")
+            except Exception as exc:
+                logger.warning(f"Failed to load {json_file.name}: {exc}")
+                results["total_scanned"] += 1
+                results["errors"]["validation_errors"] += 1
+                results["error_files"]["validation_errors"].append(
+                    self._canonical_image_filename(json_file.name)
+                )
+                continue
+
+            image_filename = self._canonical_image_filename(json_file.name)
+            validation_output = self.validation_service.validate(image_filename, payload)
+            error_type = self._extract_error_type(validation_output)
+            target_folder = self._store_result(image_filename, None, payload, error_type)
+            self._store_validation_artifact(image_filename, target_folder, validation_output)
+
+            results["total_scanned"] += 1
+            if error_type:
+                results["errors"].setdefault(error_type, 0)
+                results["error_files"].setdefault(error_type, [])
+                results["errors"][error_type] += 1
+                results["error_files"][error_type].append(image_filename)
+                continue
+
+            results["successful"] += 1
+            results["validated"] += 1
+            if not persist_to_db:
+                continue
+
+            resolved_song_id = self._extract_resolved_song_id(validation_output)
+            if resolved_song_id is None:
+                results["failed_to_persist"] += 1
+                continue
+
+            try:
+                timestamp_ms = self._extract_timestamp_from_filename(image_filename)
+                screenshot_payload = self._build_screenshot_payload(
+                    user_id=user_id,
+                    filename=image_filename,
+                    scan_result=payload,
+                    resolved_song_id=resolved_song_id,
+                    timestamp_ms=timestamp_ms,
+                )
+                created = self.screenshot_service.create_screenshot(screenshot_payload)
+                if created is None:
+                    results["skipped_duplicates"] += 1
+                else:
+                    results["persisted"] += 1
+            except Exception as persist_error:
+                logger.error(
+                    f"Failed to persist imported screenshot for {image_filename}: {persist_error}"
+                )
+                results["failed_to_persist"] += 1
+
+        error_count = sum(results["errors"].values())
+        results["error_rate"] = (
+            round((error_count / results["total_scanned"]) * 100, 2)
+            if results["total_scanned"]
+            else 0.0
+        )
+        logger.info(
+            "JSON import complete: processed={} successful={} persisted={} duplicates={} failed_to_persist={}",
+            results["total_scanned"],
+            results["successful"],
+            results["persisted"],
+            results["skipped_duplicates"],
+            results["failed_to_persist"],
+        )
+        return results
 
     def _store_validation_artifact(
         self,
@@ -273,6 +858,8 @@ class ScanService:
         model: Optional[str] = None,
         user_id: Optional[int] = None,
         persist_to_db: bool = False,
+        parallel_workers: Optional[int] = None,
+        keys_per_worker: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Scan images using AI model and validate results.
@@ -287,30 +874,71 @@ class ScanService:
         """
         logger.info(f"Starting scan of {len(image_list)} images from {images_folder}")
         selected_model = model or self.default_model
+        active_provider = getattr(self, "ocr_provider", OCR_PROVIDER)
 
-        results = {
-            "total_scanned": 0,
-            "successful": 0,
-            "errors": {
-                "note_errors": 0,
-                "not_found_errors": 0,
-                "fast_slow_errors": 0,
-                "max_combo_errors": 0,
-                "live_errors": 0,
-            },
-            "error_files": {
-                "note_errors": [],
-                "not_found_errors": [],
-                "fast_slow_errors": [],
-                "max_combo_errors": [],
-                "live_errors": [],
-            },
-            "error_rate": 0.0,
-            "validated": 0,
-            "persisted": 0,
-            "failed_to_persist": 0,
-            "skipped_duplicates": 0,
-        }
+        results = self._init_results()
+        results["additional"] = {}
+
+        if parallel_workers is not None or keys_per_worker is not None:
+            if parallel_workers is None or keys_per_worker is None:
+                raise ValueError(
+                    "parallel_workers and keys_per_worker must be provided together."
+                )
+
+            selected_keys = self._validate_parallel_mode(
+                parallel_workers=parallel_workers,
+                keys_per_worker=keys_per_worker,
+            )
+            chunks = self._split_image_list(image_list, parallel_workers)
+            worker_key_groups = [
+                selected_keys[idx * keys_per_worker : (idx + 1) * keys_per_worker]
+                for idx in range(parallel_workers)
+            ]
+
+            logger.info(
+                "Parallel scan enabled: workers={} keys_per_worker={} files={}",
+                parallel_workers,
+                keys_per_worker,
+                len(image_list),
+            )
+
+            with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+                futures = []
+                for idx, chunk in enumerate(chunks):
+                    if idx >= len(worker_key_groups):
+                        break
+                    if not chunk:
+                        continue
+                    futures.append(
+                        executor.submit(
+                            self._scan_images_worker,
+                            images_folder=images_folder,
+                            image_list=chunk,
+                            model=selected_model,
+                            user_id=user_id,
+                            persist_to_db=persist_to_db,
+                            worker_keys=worker_key_groups[idx],
+                        )
+                    )
+
+                for future in futures:
+                    worker_result = future.result()
+                    self._merge_scan_results(results, worker_result)
+
+            error_rate = (
+                (sum(results["errors"].values()) / results["total_scanned"]) * 100
+                if results["total_scanned"] > 0
+                else 0
+            )
+            results["error_rate"] = round(error_rate, 2)
+            results["additional"] = {
+                "provider": active_provider,
+                "parallel_workers": parallel_workers,
+                "keys_per_worker": keys_per_worker,
+                "mode": f"{parallel_workers}x{keys_per_worker}",
+                "parallel_enabled": True,
+            }
+            return results
 
         for image_file in image_list:
             image_path = os.path.join(images_folder, image_file)
@@ -338,6 +966,8 @@ class ScanService:
 
                 results["total_scanned"] += 1
                 if error_type:
+                    results["errors"].setdefault(error_type, 0)
+                    results["error_files"].setdefault(error_type, [])
                     results["errors"][error_type] += 1
                     results["error_files"][error_type].append(image_file)
                 else:
@@ -385,6 +1015,10 @@ class ScanService:
             else 0
         )
         results["error_rate"] = round(error_rate, 2)
+        results["additional"] = {
+            "provider": active_provider,
+            "parallel_enabled": False,
+        }
 
         logger.info(
             f"Scan complete: {results['successful']} successful, {sum(results['errors'].values())} errors ({error_rate:.2f}% error rate)"

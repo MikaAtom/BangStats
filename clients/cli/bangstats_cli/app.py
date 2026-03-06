@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 from bangstats_cli.api_client import BangStatsAPI
 from bangstats_cli.config import DEFAULT_SERVER_URL
 from bangstats_cli.menus import (
+    error_correction_menu,
+    import_legacy_json,
     scan_screenshots,
     update_user_settings,
     user_login,
@@ -94,22 +96,28 @@ def run(argv: list[str] | None = None):
 
             print("\nOptions:")
             print("1. Scan screenshots")
-            print("2. View your stats")
-            print("3. Update database")
-            print("4. Update user settings")
-            print("5. Exit")
+            print("2. Import legacy scan JSON folder")
+            print("3. Error correction menu")
+            print("4. View your stats")
+            print("5. Update database")
+            print("6. Update user settings")
+            print("7. Exit")
 
             choice = input("Enter your choice: ").strip()
             if choice == "1":
                 scan_screenshots(api, user, screenshots_path_override=args.screenshots_path)
             elif choice == "2":
-                view_stats(api, user)
+                import_legacy_json(api, user)
             elif choice == "3":
-                counts = api.sync(game_server)
+                error_correction_menu(api, user)
             elif choice == "4":
+                view_stats(api, user)
+            elif choice == "5":
+                counts = api.sync(game_server)
+            elif choice == "6":
                 user = update_user_settings(api, user)
                 game_server = user["server"]
-            elif choice == "5":
+            elif choice == "7":
                 print("Exiting BangStats. Goodbye!")
                 return
     finally:

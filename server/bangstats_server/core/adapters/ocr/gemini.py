@@ -1,13 +1,17 @@
 from google import genai
 import json
+from typing import Optional
 
 from bangstats_server.core.config import GOOGLE_API_KEY
 
 
 class GoogleModelService:
-    def __init__(self):
-        raw = GOOGLE_API_KEY
-        self.API_KEYS = [k.strip() for k in raw.split(",") if k.strip()]
+    def __init__(self, api_keys: Optional[list[str]] = None):
+        if api_keys is not None:
+            self.API_KEYS = [k.strip() for k in api_keys if k and k.strip()]
+        else:
+            raw = GOOGLE_API_KEY
+            self.API_KEYS = [k.strip() for k in raw.split(",") if k.strip()]
         if not self.API_KEYS:
             raise ValueError(
                 "GOOGLE_API_KEY is not set. Set it in the environment or in a .env file."
