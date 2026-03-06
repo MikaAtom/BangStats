@@ -166,4 +166,4 @@ reports/
 _other/
 *sandbox.py
 cache/
-/bangstats/storage/
+/storage/
