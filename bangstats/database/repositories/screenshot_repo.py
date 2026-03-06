@@ -55,12 +55,31 @@ class ScreenshotRepository:
         )
         return self._session.exec(statement).all()
 
+    def get_by_user_and_filename(self, user_id: int, filename: str) -> Optional[Screenshot]:
+        """Retrieve a screenshot by user and filename."""
+        if not isinstance(user_id, int) or user_id <= 0:
+            return None
+        if not filename or not isinstance(filename, str):
+            return None
+
+        statement = select(Screenshot).where(
+            Screenshot.user_id == user_id,
+            Screenshot.filename == filename,
+        )
+        return self._session.exec(statement).first()
+
     def create(self, screenshot_data: Dict[str, Any]) -> Tuple[Optional[Screenshot], Optional[str]]:
         """
         Create a new screenshot record.
         Always returns (screenshot, None) or (None, error_message)
         """
         try:
+            existing = self.get_by_user_and_filename(
+                screenshot_data.get("user_id", 0), screenshot_data.get("filename", "")
+            )
+            if existing is not None:
+                return None, "duplicate"
+
             screenshot = Screenshot(**screenshot_data)
             self._session.add(screenshot)
             self._session.commit()

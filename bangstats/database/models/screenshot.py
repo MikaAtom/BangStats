@@ -36,4 +36,5 @@ class Screenshot(SQLModel, table=True):
 
     # Metadata
     anomaly: bool = Field(default=False)
+    filename: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.now)

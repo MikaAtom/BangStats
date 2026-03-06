@@ -1,0 +1,71 @@
+You are given a screenshot of a rhythm game results screen. Analyze the text in the image and return the following data as a JSON object. Follow these rules exactly:
+
+1. JSON Only: Your entire response must be a valid JSON object. Do not add any text before or after it.
+2. Exact Data: Use only the text and numbers visible in the image.
+
+FIELD DESCRIPTIONS:
+
+score: Large, prominent number in the upper-right quadrant. May be labeled "Score" or "Event Score" above or to its left.
+
+high_score: Number directly below the main score, always preceded by "High Score" or "Event High Score" label. If no such label exists, return -1.
+
+is_new_record: Red text "NEW RECORD!" appearing directly above the main score. Return true if visible, false otherwise.
+
+score_rank: Large letter(s) (D, C, B, A, S, SS, SSS) inside a colorful badge to the right of the main score. Return "-1" if not found.
+
+live_type: Determine by scanning ALL text on the image (case-insensitive) in this priority order:
+<-! festival !->   - If "TEAM LIVE BATTLE" is present -> "Team Live Battle"
+   - If "HIGH SCORE RATING" is present AND "MEMBER SCORES" is NOT present -> "Free Live"
+<-! challenge !->   - If "CHALLENGE SONG" or "CHALLENGE" is present -> "Challenge Live"
+   - If "MEMBER SCORES" is present -> "Multi Live"
+<-! medley !->   - Otherwise -> "Medley Live"
+
+free_live_data: Only populated if live_type is "Free Live", otherwise return -1.
+   - Values are in the "High Score Rating" box (bottom-left area)
+   - Look for numbers after "Song", "Band", and "Total" labels
+
+<-! festival !->team_live_data: Only populated if live_type is "Team Live Battle", otherwise return -1.
+<-! festival !->   - team_live_status: "WIN" or "LOSE" text in top-right corner
+<-! festival !->   - team_live_stage: Text like "Combo Stage", "Accuracy Stage", or "Energy Stage", below song name in upper-left
+
+max_combo: Second column to the right of perfect, great, good, bad, miss counts, number in distinct box, under "MAX COMBO" label.
+
+fast, slow: Second column to the right of perfect/great counts, above Max Combo count. "FAST" and "SLOW" labels with numbers. Return -1 if not visible.
+
+perfect, great, good, bad, miss: First vertical column in center-right area. Labels on left, numerical values aligned right on the same height as label.
+
+song_level: Number on far right of top bar, prefixed with "Lv." or "Song Level".
+
+difficulty: Text in colored star-shaped icon on far left of top bar. One of: "special", "expert", "hard", "normal", "easy".
+
+song_name_from_top_bar_text: Song name in top bar, right of difficulty icon. Black text on white background. Do not include difficulty names or song level numbers.
+
+REQUIRED JSON STRUCTURE (all fields must be present):
+
+{
+  "score": int,
+  "high_score": int,
+  "is_new_record": bool,
+  "score_rank": str,
+  "live_type": str,
+  "free_live_data": {
+    "free_live_song": int,
+    "free_live_band": int,
+    "free_live_total": int
+  },
+<-! festival !->  "team_live_data": {
+<-! festival !->    "team_live_status": str,
+<-! festival !->    "team_live_stage": str
+  },
+  "perfect": int,
+  "great": int,
+  "good": int,
+  "bad": int,
+  "miss": int,
+  "fast": int,
+  "slow": int,
+  "max_combo": int,
+  "song_level": int,
+  "difficulty": str,
+  "song_name_from_top_bar_text": str
+}

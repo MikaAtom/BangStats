@@ -1,47 +1,80 @@
-## BanG Dream! Girls Band Party statistics scanner and manager.
+# BangStats
 
-Українська версія цього файлу знаходиться [тут](README_uk.md).
+CLI tool for scanning BanG Dream! Girls Band Party result screenshots and organizing gameplay data.
 
-Tool for scanning and analyzing screenshots of the game's live results screen. Functionality would be welcome in the base game, but here we are.
+Ukrainian README: [README_uk.md](README_uk.md)
 
-![image](https://i.imgur.com/7qX5Rmi.png)
+## What it does
+- syncs songs, bands, and events from Bestdori
+- scans screenshots with OCR/LLM adapters (Gemini currently wired)
+- validates extracted gameplay data
+- stores scan outputs in cache and app data in SQLite
 
-## Features
-- [x] Scan screenshots of the live results screen and extract the results
-- [x] Fix them manually if errors occur during scanning
-- [x] View statistics your global and per-song statistics
-- [x] Localization support
+## Setup
+1. Install `uv`:
+   - `brew install uv` (macOS) or see [uv docs](https://docs.astral.sh/uv/)
+2. Sync dependencies:
+   - `uv sync --dev`
+3. Configure environment (optional but recommended):
+   - Copy `.env.example` to `.env` and set `GOOGLE_API_KEY` (required for scanning).
+   - Or set `GOOGLE_API_KEY` in your shell.
+4. Run:
+   - `uv run bangstats`
 
-## Installation
-1. Download the latest release from the [releases page](https://github.com/MikeAtom/BangStats/releases)
-2. Extract the archive to a folder of your choice
-3. Install the pytorch with CUDA support. See [here](https://pytorch.org/get-started/locally/) for instructions.
-4. Install the dependencies by running `pip install -r requirements.txt` in the folder you extracted the archive to
-5. Run the program by running `main.pyw` in the folder you extracted the archive to
+Optional (global command):
+- Install as a uv tool once: `uv tool install --editable .`
+- Then run directly: `bangstats`
 
-Side note: If you intend to use GPU acceleration, you will need to have an NVIDIA GPU and install the pytorch with CUDA support. Once again, see [here](https://pytorch.org/get-started/locally/) for instructions.
+## Current CLI flow
+1. Login/create user profile
+2. Sync remote reference data
+3. Use dashboard actions:
+   - Scan screenshots
+   - View your stats (placeholder)
+   - Update database
+   - Update user settings
 
-## Usage
-First of all, the program cannot get data out of thin air. You will need to provide it with screenshots of the in-game live results screen. The more screenshots you provide, the more accurate the statistics will be.
+## Dev/testing CLI parameters
+- Fast startup:
+  - `uv run bangstats --username MikaAtom --game-id 1234567 --skip-sync --exit-after-init`
+- Pre-fill user creation defaults:
+  - `uv run bangstats --username MikaAtom --game-id 1234567 --server en --screenshots-path "/path/to/screenshots"`
+- Flush specific data targets (no confirmation prompt):
+  - `uv run bangstats --flush-remote-cache`
+  - `uv run bangstats --flush-scan-cache --flush-db`
+- Flush everything:
+  - `uv run bangstats --flush-all`
 
+Flush operations never hard-delete files. They move data into:
+- `bangstats/storage/backups/<ISO-timestamp>/...`
 
-1. Take all of your screenshots and put them in a single folder of your choice.
-2. Open the program and locate the folder with the screenshots.
-3. Create a new profile and give it a name.
-4. Click the "Scan" button.
-5. Follow the instructions on the screen. Keep in mind that the scanning process may take a while, depending on the number of screenshots you provided.
-6. When the scanning process is complete, you have to manually fix any errors that may have occurred during the scanning process. Click the "Post-process" button on the main screen to do so.
-7. Once again, follow the instructions on the screen.
-8. After that, you can view your statistics by clicking the "Profile" button on the main screen.
+## Project structure
+```text
+bangstats/
+  cli/                     # CLI entrypoint + interactive menus
+  services/
+    scanning/              # scan + validation pipeline
+    data/                  # entity-focused business services
+  adapters/
+    ocr/                   # OCR integrations and prompt templates
+    bestdori.py            # Bestdori API adapter
+  database/                # db engine, models, repositories
+  config/                  # defaults and config loading
+  utils/                   # shared utility modules
 
-## Known issues and limitations
-- Tested only on Windows, cannot guarantee that it will work on other platforms
-- Also tested only on Android screenshots, cannot guarantee that it will work on iOS ones
-- The program is made with Endori in mind, so it may not work correctly with screenshots from other servers
-- "Sʼil Vous President" has Cover and Extra versions with the same name, so it will sometimes appear as Note Missmatch
+scripts/                   # project scripts / data transformers
+tests/                     # test suite
+```
 
-## Custom localizations
-The program supports custom localizations. To create one, you will need to create a new file in the `data/lang` folder and name it according to the language you want to translate the program to. For example, if you're going to translate the program to German, you will need to create a file named `de.json`. The file must be in JSON format. Use the provided localizations as a reference.
+## Where to add new code
+- new OCR provider -> `bangstats/adapters/ocr/`
+- new OCR prompt -> `bangstats/adapters/ocr/prompts/`
+- new external API adapter -> `bangstats/adapters/`
+- new scan pipeline logic -> `bangstats/services/scanning/`
+- new entity business logic -> `bangstats/services/data/`
+- new CLI behavior -> `bangstats/cli/`
+- new DB model/repository logic -> `bangstats/database/`
 
-## Feedback
-If you have any questions, suggestions, or bug reports, feel free to contact me [anywhere](https://linktr.ee/MikeAtom) 
+## Notes
+- This is a pet project: structure is intentionally lightweight.
+- Keep dependencies directional: `cli -> services -> (database, adapters)`.

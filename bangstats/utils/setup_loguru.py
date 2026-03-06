@@ -1,9 +1,8 @@
 from loguru import logger
-import sys
 from datetime import datetime
 import os
 
-from bangstats.config.config import Config
+from bangstats.config import LOGS_DIR, LOG_LEVEL, LOG_FILE_NAME
 
 INFO_FORMAT = "[<green>{time:YYYY-MM-DD HH:mm:ss}</green>][<level>{level: <4}</level>]: {message}"
 DEBUG_FORMAT = "[{time:YYYY-MM-DD HH:mm:ss.SSS}][{level: <4}][{file}:{function}:{line}]: {message}"
@@ -13,11 +12,9 @@ def setup_loguru(
     retention="10 days",
     compression="zip"
 ):
-
-    config = Config()
-    log_dir = config.get("LOGS_DIR")
-    level = config.get("LOG_LEVEL")
-    log_file_name = config.get("LOG_FILE_NAME")
+    log_dir = LOGS_DIR
+    level = LOG_LEVEL
+    log_file_name = LOG_FILE_NAME
 
 
     # Select format
