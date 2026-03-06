@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
-from bangstats.services.data.stats import (
+from bangstats_server.core.services.stats import (
     compute_difficulty_detail,
     compute_general_summary,
     compute_recent_plays,

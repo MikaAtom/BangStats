@@ -1,0 +1,16 @@
+{
+  "is_valid": true,
+  "error_type": null,
+  "resolved_song_id": 325,
+  "normalized": {
+    "song_name": "exist",
+    "difficulty": "expert",
+    "total_notes": 560,
+    "live_type": "medley live"
+  },
+  "reasons": [
+    "resolved_exact_name"
+  ],
+  "severity": "info",
+  "confidence": 1.0
+}

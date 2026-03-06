@@ -1,0 +1,443 @@
+{
+    "bgmId": "bgm115",
+    "bgmFile": "115_wata_choco",
+    "tag": "normal",
+    "bandId": 1,
+    "achievements": [
+        {
+            "musicId": 115,
+            "achievementType": "combo_easy",
+            "rewardType": "coin",
+            "quantity": 5000
+        },
+        {
+            "musicId": 115,
+            "achievementType": "combo_expert",
+            "rewardType": "coin",
+            "quantity": 20000
+        },
+        {
+            "musicId": 115,
+            "achievementType": "combo_hard",
+            "rewardType": "coin",
+            "quantity": 15000
+        },
+        {
+            "musicId": 115,
+            "achievementType": "combo_normal",
+            "rewardType": "coin",
+            "quantity": 10000
+        },
+        {
+            "musicId": 115,
+            "achievementType": "combo_special",
+            "rewardType": "coin",
+            "quantity": 20000
+        },
+        {
+            "musicId": 115,
+            "achievementType": "full_combo_easy",
+            "rewardType": "coin",
+            "quantity": 10000
+        },
+        {
+            "musicId": 115,
+            "achievementType": "full_combo_expert",
+            "rewardType": "star",
+            "quantity": 50
+        },
+        {
+            "musicId": 115,
+            "achievementType": "full_combo_hard",
+            "rewardType": "star",
+            "quantity": 50
+        },
+        {
+            "musicId": 115,
+            "achievementType": "full_combo_normal",
+            "rewardType": "coin",
+            "quantity": 20000
+        },
+        {
+            "musicId": 115,
+            "achievementType": "full_combo_special",
+            "rewardType": "star",
+            "quantity": 50
+        },
+        {
+            "musicId": 115,
+            "achievementType": "score_rank_a",
+            "rewardType": "practice_ticket",
+            "rewardId": 2,
+            "quantity": 1
+        },
+        {
+            "musicId": 115,
+            "achievementType": "score_rank_b",
+            "rewardType": "practice_ticket",
+            "rewardId": 2,
+            "quantity": 1
+        },
+        {
+            "musicId": 115,
+            "achievementType": "score_rank_c",
+            "rewardType": "practice_ticket",
+            "rewardId": 2,
+            "quantity": 1
+        },
+        {
+            "musicId": 115,
+            "achievementType": "score_rank_s",
+            "rewardType": "star",
+            "quantity": 50
+        },
+        {
+            "musicId": 115,
+            "achievementType": "score_rank_ss",
+            "rewardType": "star",
+            "quantity": 50
+        }
+    ],
+    "jacketImage": [
+        "115_wata_choco"
+    ],
+    "seq": 19,
+    "musicTitle": [
+        "私の心はチョココロネ",
+        "Choco Cornet Love",
+        "私の心はチョココロネ",
+        "私の心はチョココロネ",
+        "내 마음은 초코 소라빵"
+    ],
+    "ruby": [
+        "わたしのこころはちょこころね",
+        "chococornetlove",
+        "わたしのこころはちょこころね",
+        "わたしのこころはちょこころね",
+        "내 마음은 초코 소라빵"
+    ],
+    "phonetic": [
+        "ワタシノココロワチョココロネ",
+        "chococornetlove",
+        "ワタシノココロワチョココロネ",
+        "ワタシノココロワチョココロネ",
+        "내마음은초코소라빵"
+    ],
+    "lyricist": [
+        "織田あすか（Elements Garden）",
+        "Asuka Oda (Elements Garden)",
+        "織田あすか（Elements Garden）",
+        "織田あすか（Elements Garden）",
+        "오다 아스카 (Elements Garden)"
+    ],
+    "composer": [
+        "藤田淳平（Elements Garden）",
+        "Junpei Fujita (Elements Garden)",
+        "藤田淳平（Elements Garden)",
+        "藤田淳平（Elements Garden)",
+        "후지타 준페이 (Elements Garden)"
+    ],
+    "arranger": [
+        "藤田淳平（Elements Garden）",
+        "Junpei Fujita (Elements Garden)",
+        "藤田淳平（Elements Garden)",
+        "藤田淳平（Elements Garden)",
+        "후지타 준페이 (Elements Garden)"
+    ],
+    "howToGet": [
+        "Poppin'Partyバンドストーリー0章「第１１話」で解放",
+        "Unlock by viewing Chapter 11 of Story 0",
+        "通關Poppin'Party樂團劇情第0章「第１１話」開放",
+        "Poppin'Party结成！0章「第11话」阅读赠送歌曲",
+        "Poppin'Party 밴드 스토리 0장 「제11화」에서 오픈"
+    ],
+    "publishedAt": [
+        "1524452400000",
+        "1561104000000",
+        "1538031600000",
+        "1584334800000",
+        "1524452400000"
+    ],
+    "closedAt": [
+        "4102714800000",
+        "4102747200000",
+        "4102372800000",
+        "4133908800000",
+        "4102714800000"
+    ],
+    "difficulty": {
+        "0": {
+            "playLevel": 9,
+            "multiLiveScoreMap": {
+                "2001": {
+                    "musicId": 115,
+                    "musicDifficulty": "easy",
+                    "multiLiveDifficultyId": 2001,
+                    "scoreS": 3159000,
+                    "scoreA": 2106000,
+                    "scoreB": 1053000,
+                    "scoreC": 175500,
+                    "multiLiveDifficultyType": "daredemo",
+                    "scoreSS": 4212000,
+                    "scoreSSS": 0
+                },
+                "2011": {
+                    "musicId": 115,
+                    "musicDifficulty": "easy",
+                    "multiLiveDifficultyId": 2011,
+                    "scoreS": 3159000,
+                    "scoreA": 2106000,
+                    "scoreB": 1053000,
+                    "scoreC": 175500,
+                    "multiLiveDifficultyType": "standard",
+                    "scoreSS": 4212000,
+                    "scoreSSS": 0
+                },
+                "2021": {
+                    "musicId": 115,
+                    "musicDifficulty": "easy",
+                    "multiLiveDifficultyId": 2021,
+                    "scoreS": 7371000,
+                    "scoreA": 6318000,
+                    "scoreB": 4563000,
+                    "scoreC": 2457000,
+                    "multiLiveDifficultyType": "grand",
+                    "scoreSS": 8248500,
+                    "scoreSSS": 0
+                },
+                "2031": {
+                    "musicId": 115,
+                    "musicDifficulty": "easy",
+                    "multiLiveDifficultyId": 2031,
+                    "scoreS": 9828000,
+                    "scoreA": 8599500,
+                    "scoreB": 7371000,
+                    "scoreC": 4914000,
+                    "multiLiveDifficultyType": "legend",
+                    "scoreSS": 11056500,
+                    "scoreSSS": 12285000
+                }
+            },
+            "notesQuantity": 1000,
+            "scoreC": 35100,
+            "scoreB": 210600,
+            "scoreA": 421200,
+            "scoreS": 631800,
+            "scoreSS": 842400
+        },
+        "1": {
+            "playLevel": 13,
+            "multiLiveScoreMap": {
+                "2001": {
+                    "musicId": 115,
+                    "musicDifficulty": "normal",
+                    "multiLiveDifficultyId": 2001,
+                    "scoreS": 3159000,
+                    "scoreA": 2106000,
+                    "scoreB": 1053000,
+                    "scoreC": 175500,
+                    "multiLiveDifficultyType": "daredemo",
+                    "scoreSS": 4212000,
+                    "scoreSSS": 0
+                },
+                "2011": {
+                    "musicId": 115,
+                    "musicDifficulty": "normal",
+                    "multiLiveDifficultyId": 2011,
+                    "scoreS": 3159000,
+                    "scoreA": 2106000,
+                    "scoreB": 1053000,
+                    "scoreC": 175500,
+                    "multiLiveDifficultyType": "standard",
+                    "scoreSS": 4212000,
+                    "scoreSSS": 0
+                },
+                "2021": {
+                    "musicId": 115,
+                    "musicDifficulty": "normal",
+                    "multiLiveDifficultyId": 2021,
+                    "scoreS": 7371000,
+                    "scoreA": 6318000,
+                    "scoreB": 4563000,
+                    "scoreC": 2457000,
+                    "multiLiveDifficultyType": "grand",
+                    "scoreSS": 8248500,
+                    "scoreSSS": 0
+                },
+                "2031": {
+                    "musicId": 115,
+                    "musicDifficulty": "normal",
+                    "multiLiveDifficultyId": 2031,
+                    "scoreS": 9828000,
+                    "scoreA": 8599500,
+                    "scoreB": 7371000,
+                    "scoreC": 4914000,
+                    "multiLiveDifficultyType": "legend",
+                    "scoreSS": 11056500,
+                    "scoreSSS": 12285000
+                }
+            },
+            "notesQuantity": 1000,
+            "scoreC": 35100,
+            "scoreB": 210600,
+            "scoreA": 421200,
+            "scoreS": 631800,
+            "scoreSS": 842400
+        },
+        "2": {
+            "playLevel": 18,
+            "multiLiveScoreMap": {
+                "2001": {
+                    "musicId": 115,
+                    "musicDifficulty": "hard",
+                    "multiLiveDifficultyId": 2001,
+                    "scoreS": 3159000,
+                    "scoreA": 2106000,
+                    "scoreB": 1053000,
+                    "scoreC": 175500,
+                    "multiLiveDifficultyType": "daredemo",
+                    "scoreSS": 4212000,
+                    "scoreSSS": 0
+                },
+                "2011": {
+                    "musicId": 115,
+                    "musicDifficulty": "hard",
+                    "multiLiveDifficultyId": 2011,
+                    "scoreS": 3159000,
+                    "scoreA": 2106000,
+                    "scoreB": 1053000,
+                    "scoreC": 175500,
+                    "multiLiveDifficultyType": "standard",
+                    "scoreSS": 4212000,
+                    "scoreSSS": 0
+                },
+                "2021": {
+                    "musicId": 115,
+                    "musicDifficulty": "hard",
+                    "multiLiveDifficultyId": 2021,
+                    "scoreS": 7371000,
+                    "scoreA": 6318000,
+                    "scoreB": 4563000,
+                    "scoreC": 2457000,
+                    "multiLiveDifficultyType": "grand",
+                    "scoreSS": 8248500,
+                    "scoreSSS": 0
+                },
+                "2031": {
+                    "musicId": 115,
+                    "musicDifficulty": "hard",
+                    "multiLiveDifficultyId": 2031,
+                    "scoreS": 9828000,
+                    "scoreA": 8599500,
+                    "scoreB": 7371000,
+                    "scoreC": 4914000,
+                    "multiLiveDifficultyType": "legend",
+                    "scoreSS": 11056500,
+                    "scoreSSS": 12285000
+                }
+            },
+            "notesQuantity": 1000,
+            "scoreC": 35100,
+            "scoreB": 210600,
+            "scoreA": 421200,
+            "scoreS": 631800,
+            "scoreSS": 842400
+        },
+        "3": {
+            "playLevel": 22,
+            "multiLiveScoreMap": {
+                "2001": {
+                    "musicId": 115,
+                    "musicDifficulty": "expert",
+                    "multiLiveDifficultyId": 2001,
+                    "scoreS": 3159000,
+                    "scoreA": 2106000,
+                    "scoreB": 1053000,
+                    "scoreC": 175500,
+                    "multiLiveDifficultyType": "daredemo",
+                    "scoreSS": 4212000,
+                    "scoreSSS": 0
+                },
+                "2011": {
+                    "musicId": 115,
+                    "musicDifficulty": "expert",
+                    "multiLiveDifficultyId": 2011,
+                    "scoreS": 3159000,
+                    "scoreA": 2106000,
+                    "scoreB": 1053000,
+                    "scoreC": 175500,
+                    "multiLiveDifficultyType": "standard",
+                    "scoreSS": 4212000,
+                    "scoreSSS": 0
+                },
+                "2021": {
+                    "musicId": 115,
+                    "musicDifficulty": "expert",
+                    "multiLiveDifficultyId": 2021,
+                    "scoreS": 7371000,
+                    "scoreA": 6318000,
+                    "scoreB": 4563000,
+                    "scoreC": 2457000,
+                    "multiLiveDifficultyType": "grand",
+                    "scoreSS": 8248500,
+                    "scoreSSS": 0
+                },
+                "2031": {
+                    "musicId": 115,
+                    "musicDifficulty": "expert",
+                    "multiLiveDifficultyId": 2031,
+                    "scoreS": 9828000,
+                    "scoreA": 8599500,
+                    "scoreB": 7371000,
+                    "scoreC": 4914000,
+                    "multiLiveDifficultyType": "legend",
+                    "scoreSS": 11056500,
+                    "scoreSSS": 12285000
+                }
+            },
+            "notesQuantity": 1000,
+            "scoreC": 35100,
+            "scoreB": 210600,
+            "scoreA": 421200,
+            "scoreS": 631800,
+            "scoreSS": 842400
+        }
+    },
+    "length": 114.696,
+    "notes": {
+        "0": 139,
+        "1": 232,
+        "2": 381,
+        "3": 482
+    },
+    "bpm": {
+        "0": [
+            {
+                "bpm": 134,
+                "start": 0,
+                "end": 114.696
+            }
+        ],
+        "1": [
+            {
+                "bpm": 134,
+                "start": 0,
+                "end": 114.696
+            }
+        ],
+        "2": [
+            {
+                "bpm": 134,
+                "start": 0,
+                "end": 114.696
+            }
+        ],
+        "3": [
+            {
+                "bpm": 134,
+                "start": 0,
+                "end": 114.696
+            }
+        ]
+    }
+}

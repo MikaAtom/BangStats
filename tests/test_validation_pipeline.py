@@ -2,8 +2,8 @@ from pathlib import Path
 from types import SimpleNamespace
 import json
 
-from bangstats.services.scanning.scan import ScanService
-from bangstats.services.scanning.validation import ValidationResult, ValidationService
+from bangstats_server.core.services.scan import ScanService
+from bangstats_server.core.services.validation import ValidationResult, ValidationService
 
 
 class _FakeSongService:

@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, inspect, text
 
-from bangstats.database import db
+from bangstats_server.core import db
 
 
 def test_screenshot_filename_column_migration_is_idempotent():
