@@ -453,6 +453,66 @@ def view_stats(api: BangStatsAPI, user: dict) -> None:
             )
 
 
+def view_sync_jobs(api: BangStatsAPI) -> None:
+    status_filter_raw = input(
+        "Filter by status (queued/running/succeeded/failed, blank for all): "
+    ).strip()
+    status_filter = status_filter_raw or None
+    limit_raw = input("How many recent jobs to show? [10]: ").strip()
+    try:
+        limit = int(limit_raw) if limit_raw else 10
+        if limit <= 0:
+            raise ValueError
+    except ValueError:
+        print("Invalid limit, using 10.")
+        limit = 10
+
+    try:
+        payload = api.list_sync_jobs(limit=limit, status=status_filter)
+    except Exception as exc:
+        print(f"Unable to fetch sync jobs: {exc}")
+        return
+
+    jobs = payload.get("jobs", [])
+    if not jobs:
+        print("No sync jobs found.")
+        return
+
+    print("\nRecent sync jobs:")
+    for job in jobs:
+        print(
+            f"  #{job.get('id')} | {job.get('status')} | server={job.get('server')} "
+            f"| created={job.get('created_at')}"
+        )
+
+    detail_raw = input("Enter job ID to view details (blank to go back): ").strip()
+    if not detail_raw:
+        return
+    if not detail_raw.isdigit():
+        print("Invalid job ID.")
+        return
+
+    try:
+        detail = api.get_sync_job(int(detail_raw))
+    except Exception as exc:
+        print(f"Unable to fetch sync job detail: {exc}")
+        return
+
+    print("\nSync job detail:")
+    print(f"  ID: {detail.get('id')}")
+    print(f"  Status: {detail.get('status')}")
+    print(f"  Server: {detail.get('server')}")
+    print(f"  Requested by user: {detail.get('requested_by_user_id')}")
+    print(f"  Created at: {detail.get('created_at')}")
+    print(f"  Started at: {detail.get('started_at')}")
+    print(f"  Finished at: {detail.get('finished_at')}")
+    print(f"  Songs: {detail.get('songs')}")
+    print(f"  Events: {detail.get('events')}")
+    print(f"  Bands: {detail.get('bands')}")
+    if detail.get("error_message"):
+        print(f"  Error: {detail.get('error_message')}")
+
+
 def update_user_settings(api: BangStatsAPI, user: dict) -> dict:
     leaving = False
     while not leaving:

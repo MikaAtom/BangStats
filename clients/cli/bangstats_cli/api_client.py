@@ -36,8 +36,28 @@ class BangStatsAPI:
         response.raise_for_status()
         return response.json()
 
-    def sync(self, server: str) -> dict[str, Any]:
-        response = self._client.post("/api/sync", json={"server": server})
+    def create_sync_job(self, server: str, requested_by_user_id: int | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {"server": server}
+        if requested_by_user_id is not None:
+            payload["requested_by_user_id"] = requested_by_user_id
+        response = self._client.post("/api/sync/jobs", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    def sync(self, server: str, requested_by_user_id: int | None = None) -> dict[str, Any]:
+        # Backward-compatible alias.
+        return self.create_sync_job(server, requested_by_user_id=requested_by_user_id)
+
+    def get_sync_job(self, job_id: int) -> dict[str, Any]:
+        response = self._client.get(f"/api/sync/jobs/{job_id}")
+        response.raise_for_status()
+        return response.json()
+
+    def list_sync_jobs(self, limit: int = 20, status: str | None = None) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": limit}
+        if status:
+            params["status"] = status
+        response = self._client.get("/api/sync/jobs", params=params)
         response.raise_for_status()
         return response.json()
 

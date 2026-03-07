@@ -1,5 +1,6 @@
 import argparse
 
+import httpx
 from dotenv import load_dotenv
 
 from bangstats_cli.api_client import BangStatsAPI
@@ -10,6 +11,7 @@ from bangstats_cli.menus import (
     scan_screenshots,
     update_user_settings,
     user_login,
+    view_sync_jobs,
     view_stats,
 )
 
@@ -76,7 +78,25 @@ def run(argv: list[str] | None = None):
         if args.skip_sync:
             counts = api.get_db_counts()
         else:
-            counts = api.sync(game_server)
+            try:
+                sync_job = api.create_sync_job(
+                    game_server, requested_by_user_id=int(user["id"])
+                )
+                print(
+                    "Database sync started in background "
+                    f"(job #{sync_job.get('id')}, status={sync_job.get('status')})."
+                )
+            except httpx.HTTPStatusError as exc:
+                detail = ""
+                try:
+                    detail = exc.response.json().get("detail", "")
+                except Exception:
+                    detail = exc.response.text
+                if exc.response.status_code == 409:
+                    print(f"Sync already running: {detail}")
+                else:
+                    print(f"Unable to start sync job: {detail or exc}")
+            counts = api.get_db_counts()
         current_event = api.get_current_event(game_server)
 
         print(f"BangStats successfully initialized and updated with server: {game_server}.")
@@ -101,7 +121,8 @@ def run(argv: list[str] | None = None):
             print("4. View your stats")
             print("5. Update database")
             print("6. Update user settings")
-            print("7. Exit")
+            print("7. View sync status/history")
+            print("8. Exit")
 
             choice = input("Enter your choice: ").strip()
             if choice == "1":
@@ -113,11 +134,32 @@ def run(argv: list[str] | None = None):
             elif choice == "4":
                 view_stats(api, user)
             elif choice == "5":
-                counts = api.sync(game_server)
+                try:
+                    sync_job = api.create_sync_job(
+                        game_server, requested_by_user_id=int(user["id"])
+                    )
+                    print(
+                        "Database sync started in background "
+                        f"(job #{sync_job.get('id')}, status={sync_job.get('status')})."
+                    )
+                except httpx.HTTPStatusError as exc:
+                    detail = ""
+                    try:
+                        detail = exc.response.json().get("detail", "")
+                    except Exception:
+                        detail = exc.response.text
+                    if exc.response.status_code == 409:
+                        print(f"Sync already running: {detail}")
+                    else:
+                        print(f"Unable to start sync job: {detail or exc}")
+                counts = api.get_db_counts()
             elif choice == "6":
                 user = update_user_settings(api, user)
                 game_server = user["server"]
             elif choice == "7":
+                view_sync_jobs(api)
+                counts = api.get_db_counts()
+            elif choice == "8":
                 print("Exiting BangStats. Goodbye!")
                 return
     finally:

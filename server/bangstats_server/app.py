@@ -14,11 +14,15 @@ from bangstats_server.api.routers import api_router
 
 from bangstats_server.core.config import DB_PATH, REMOTE_CACHE, SCAN_CACHE
 from bangstats_server.core.db import init_db
+from bangstats_server.core.services.sync_job import SyncJobService
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    SyncJobService().fail_all_active_jobs(
+        error_message="Marked failed after server restart during sync execution."
+    )
     yield
 
 

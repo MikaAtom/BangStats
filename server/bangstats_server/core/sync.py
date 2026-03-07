@@ -10,12 +10,11 @@ from bangstats_server.core.services.band import BandService
 from bangstats_server.core.services.event import EventService
 from bangstats_server.core.services.song import SongService
 
-song_service = SongService()
-event_service = EventService()
-band_service = BandService()
-
 
 def get_db_counts() -> tuple[int, int, int]:
+    song_service = SongService()
+    event_service = EventService()
+    band_service = BandService()
     return (
         len(song_service.get_all_songs()),
         len(event_service.get_all_events()),
@@ -24,6 +23,10 @@ def get_db_counts() -> tuple[int, int, int]:
 
 
 def update_db(server: str) -> tuple[int, int, int]:
+    song_service = SongService()
+    event_service = EventService()
+    band_service = BandService()
+
     def _localized_name(value, locale, fallback="Unknown"):
         if isinstance(value, dict):
             return value.get(locale) or fallback

@@ -3,7 +3,9 @@ from __future__ import annotations
 import sys
 import uuid
 import io
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -15,6 +17,7 @@ if str(SERVER_PATH) not in sys.path:
 
 from bangstats_server.app import app
 from bangstats_server.api.routers import scans as scans_router
+from bangstats_server.api.routers import sync as sync_router
 
 
 def test_health_route():
@@ -317,3 +320,169 @@ def test_scan_route_rejects_invalid_parallel_mode(monkeypatch):
             files={"files": ("Screenshot_1.png", io.BytesIO(b"fake"), "image/png")},
         )
         assert response.status_code == 400
+
+
+def test_create_sync_job_route(monkeypatch):
+    created_job = SimpleNamespace(
+        id=42,
+        server="en",
+        status="queued",
+        requested_by_user_id=7,
+        created_at=datetime.now(timezone.utc),
+        started_at=None,
+        finished_at=None,
+        songs=None,
+        events=None,
+        bands=None,
+        error_message=None,
+    )
+    run_calls: list[tuple[int, str]] = []
+
+    class _FakeSyncJobService:
+        def create_job(self, *, server, requested_by_user_id):
+            assert server == "en"
+            assert requested_by_user_id == 7
+            return created_job
+
+    def _fake_run_sync_job(job_id: int, server: str):
+        run_calls.append((job_id, server))
+
+    monkeypatch.setattr(sync_router, "SyncJobService", _FakeSyncJobService)
+    monkeypatch.setattr(sync_router, "_run_sync_job", _fake_run_sync_job)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/sync/jobs",
+            json={"server": "en", "requested_by_user_id": 7},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["id"] == 42
+        assert payload["status"] == "queued"
+        assert run_calls == [(42, "en")]
+
+
+def test_create_sync_job_route_rejects_active_job(monkeypatch):
+    class _FakeSyncJobService:
+        def create_job(self, *, server, requested_by_user_id):
+            raise ValueError("Sync already active (job_id=99, status=running)")
+
+    monkeypatch.setattr(sync_router, "SyncJobService", _FakeSyncJobService)
+
+    with TestClient(app) as client:
+        response = client.post("/api/sync/jobs", json={"server": "en"})
+        assert response.status_code == 409
+        assert "already active" in response.json()["detail"].lower()
+
+
+def test_sync_job_get_and_list_routes(monkeypatch):
+    now = datetime.now(timezone.utc)
+    job_a = SimpleNamespace(
+        id=5,
+        server="jp",
+        status="running",
+        requested_by_user_id=2,
+        created_at=now,
+        started_at=now,
+        finished_at=None,
+        songs=None,
+        events=None,
+        bands=None,
+        error_message=None,
+    )
+    job_b = SimpleNamespace(
+        id=4,
+        server="en",
+        status="succeeded",
+        requested_by_user_id=2,
+        created_at=now,
+        started_at=now,
+        finished_at=now,
+        songs=700,
+        events=420,
+        bands=45,
+        error_message=None,
+    )
+
+    class _FakeSyncJobService:
+        def get_job(self, job_id):
+            return job_a if job_id == 5 else None
+
+        def list_jobs(self, *, limit, status):
+            assert limit == 10
+            assert status == "running"
+            return [job_a, job_b]
+
+    monkeypatch.setattr(sync_router, "SyncJobService", _FakeSyncJobService)
+
+    with TestClient(app) as client:
+        get_response = client.get("/api/sync/jobs/5")
+        assert get_response.status_code == 200
+        assert get_response.json()["id"] == 5
+
+        missing_response = client.get("/api/sync/jobs/999")
+        assert missing_response.status_code == 404
+
+        list_response = client.get("/api/sync/jobs", params={"limit": 10, "status": "running"})
+        assert list_response.status_code == 200
+        payload = list_response.json()
+        assert len(payload["jobs"]) == 2
+        assert payload["jobs"][0]["id"] == 5
+
+
+def test_sync_jobs_list_route_rejects_invalid_status(monkeypatch):
+    class _FakeSyncJobService:
+        def list_jobs(self, *, limit, status):
+            raise ValueError("invalid status 'abc'")
+
+    monkeypatch.setattr(sync_router, "SyncJobService", _FakeSyncJobService)
+
+    with TestClient(app) as client:
+        response = client.get("/api/sync/jobs", params={"status": "abc"})
+        assert response.status_code == 400
+
+
+def test_run_sync_job_marks_success(monkeypatch):
+    calls: list[tuple] = []
+
+    class _FakeSyncJobService:
+        def mark_running(self, job_id):
+            calls.append(("running", job_id))
+
+        def mark_succeeded(self, job_id, *, songs, events, bands):
+            calls.append(("succeeded", job_id, songs, events, bands))
+
+        def mark_failed(self, job_id, *, error_message):
+            calls.append(("failed", job_id, error_message))
+
+    monkeypatch.setattr(sync_router, "SyncJobService", _FakeSyncJobService)
+    monkeypatch.setattr(sync_router, "update_db", lambda server: (111, 222, 333))
+
+    sync_router._run_sync_job(1, "en")
+    assert calls == [("running", 1), ("succeeded", 1, 111, 222, 333)]
+
+
+def test_run_sync_job_marks_failure(monkeypatch):
+    calls: list[tuple] = []
+
+    class _FakeSyncJobService:
+        def mark_running(self, job_id):
+            calls.append(("running", job_id))
+
+        def mark_succeeded(self, job_id, *, songs, events, bands):
+            calls.append(("succeeded", job_id, songs, events, bands))
+
+        def mark_failed(self, job_id, *, error_message):
+            calls.append(("failed", job_id, error_message))
+
+    def _raise(_server):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(sync_router, "SyncJobService", _FakeSyncJobService)
+    monkeypatch.setattr(sync_router, "update_db", _raise)
+
+    sync_router._run_sync_job(2, "jp")
+    assert calls[0] == ("running", 2)
+    assert calls[1][0] == "failed"
+    assert calls[1][1] == 2
+    assert "boom" in calls[1][2]

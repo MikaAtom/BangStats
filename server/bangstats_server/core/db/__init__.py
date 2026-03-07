@@ -44,4 +44,5 @@ from bangstats_server.core.db.models.song import Song # noqa
 from bangstats_server.core.db.models.event import Event # noqa
 from bangstats_server.core.db.models.band import Band # noqa
 from bangstats_server.core.db.models.screenshot import Screenshot # noqa
+from bangstats_server.core.db.models.sync_job import SyncJob # noqa
 from bangstats_server.core.db.models.user import User # noqa
