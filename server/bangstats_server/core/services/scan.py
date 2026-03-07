@@ -222,20 +222,32 @@ class ScanService:
 
     def _extract_timestamp_from_filename(self, filename: str) -> Optional[int]:
         """Extract timestamp from screenshot filename."""
-        match = re.search(r"Screenshot_(\d{8})[-_](\d{6})", filename)
-        if not match:
-            logger.warning(f"Could not extract timestamp from filename: {filename}")
-            return None
+        # Legacy format: Screenshot_YYYYMMDD_HHMMSS...
+        compact_match = re.search(r"Screenshot_(\d{8})[-_](\d{6})", filename)
+        if compact_match:
+            date_part = compact_match.group(1)  # YYYYMMDD
+            time_part = compact_match.group(2)  # HHMMSS
+            dt = datetime.datetime.strptime(date_part + time_part, "%Y%m%d%H%M%S")
+            return int(dt.timestamp() * 1000)
 
-        date_part = match.group(1)  # YYYYMMDD
-        time_part = match.group(2)  # HHMMSS
-        dt = datetime.datetime.strptime(date_part + time_part, "%Y%m%d%H%M%S")
-        return int(dt.timestamp() * 1000)
+        # Newer mobile format: BanG Dream_YYYY-MM-DD-HH-MM-SS...
+        dashed_match = re.search(r"(\d{4})-(\d{2})-(\d{2})[-_](\d{2})-(\d{2})-(\d{2})", filename)
+        if dashed_match:
+            year, month, day, hour, minute, second = dashed_match.groups()
+            dt = datetime.datetime.strptime(
+                f"{year}{month}{day}{hour}{minute}{second}",
+                "%Y%m%d%H%M%S",
+            )
+            return int(dt.timestamp() * 1000)
+
+        logger.warning(f"Could not extract timestamp from filename: {filename}")
+        return None
 
     def _generate_prompt_for_timestamp(self, timestamp: Optional[int]) -> str:
         """Generate context-aware prompt based on timestamp."""
         if not timestamp:
-            return prompt_generate()  # Use default prompt
+            # Timestamp may be absent for non-Screenshot naming schemes.
+            return prompt_generate(["free live", "multi live"], self.working_prompt)
 
         # Get event at timestamp to determine available live types
         event = self.event_service.search_events_by_date(timestamp)

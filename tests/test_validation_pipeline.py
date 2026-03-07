@@ -555,3 +555,20 @@ def test_scan_local_folder_reuses_scan_images(tmp_path: Path):
     assert captured["persist_to_db"] is True
     assert captured["parallel_workers"] == 2
     assert captured["keys_per_worker"] == 1
+
+
+def test_extract_timestamp_from_bang_dream_dashed_filename():
+    scan_service = ScanService.__new__(ScanService)
+    timestamp_ms = ScanService._extract_timestamp_from_filename(
+        scan_service,
+        "BanG Dream_2026-02-18-18-27-02.heic",
+    )
+    assert isinstance(timestamp_ms, int)
+    assert timestamp_ms > 0
+
+
+def test_generate_prompt_for_missing_timestamp_uses_default_live_types():
+    scan_service = ScanService.__new__(ScanService)
+    scan_service.working_prompt = "base prompt"
+    rendered = ScanService._generate_prompt_for_timestamp(scan_service, None)
+    assert isinstance(rendered, str)
