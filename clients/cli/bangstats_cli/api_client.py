@@ -315,6 +315,39 @@ class BangStatsAPI:
         response.raise_for_status()
         return response.json()
 
+    def search_user_stat_songs(
+        self,
+        user_id: int,
+        query: str,
+        *,
+        server: str = "en",
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        response = self._client.get(
+            f"/api/users/{user_id}/stats/songs/search",
+            params={"q": query, "server": server, "limit": limit},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_user_song_stats(
+        self,
+        user_id: int,
+        song_id: int,
+        *,
+        server: str = "en",
+        difficulty: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"server": server}
+        if difficulty:
+            params["difficulty"] = difficulty
+        response = self._client.get(
+            f"/api/users/{user_id}/stats/songs/{song_id}",
+            params=params,
+        )
+        response.raise_for_status()
+        return response.json()
+
     def flush(
         self,
         *,

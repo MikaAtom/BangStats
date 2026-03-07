@@ -466,6 +466,151 @@ def error_correction_menu(api: BangStatsAPI, user: dict) -> None:
         print(f"  Failed to persist: {outcome.get('failed_to_persist')}")
 
 
+def _format_play_meta(meta: dict[str, Any] | None) -> str:
+    if not meta:
+        return "--"
+    timestamp = meta.get("timestamp")
+    filename = meta.get("filename") or "--"
+    return f"{timestamp or '--'} {filename}"
+
+
+def _print_song_difficulty_overview(overview: list[dict[str, Any]]) -> None:
+    if not overview:
+        print("No difficulty data found for this song.")
+        return
+    for item in overview:
+        difficulty = str(item.get("difficulty", "--"))
+        first_played = _format_play_meta(item.get("first_played"))
+        total_plays = int(item.get("total_plays", 0) or 0)
+        print(f"  {difficulty:<8} - first played {first_played} (plays: {total_plays})")
+
+
+def _print_song_difficulty_detail(detail: dict[str, Any]) -> None:
+    print(f"\n  Total plays: {detail.get('total_plays', 0)}")
+    print(f"  Total FC: {detail.get('total_fc', 0)}")
+    print(f"  Total AP: {detail.get('total_ap', 0)}")
+    print(f"  Accuracy: {detail.get('accuracy', 0.0)}%")
+    print(f"  First played: {_format_play_meta(detail.get('first_played'))}")
+    print(f"  Last played: {_format_play_meta(detail.get('last_played'))}")
+    print(f"  First FC: {_format_play_meta(detail.get('first_fc'))}")
+    print(f"  Last FC: {_format_play_meta(detail.get('last_fc'))}")
+    print(f"  First AP: {_format_play_meta(detail.get('first_ap'))}")
+    print(f"  Last AP: {_format_play_meta(detail.get('last_ap'))}")
+    plays_before_fc = detail.get("plays_before_fc")
+    plays_before_ap = detail.get("plays_before_ap")
+    print(
+        "  Times played before first FC: "
+        + (str(plays_before_fc) if plays_before_fc is not None else "--")
+    )
+    print(
+        "  Times played before first AP: "
+        + (str(plays_before_ap) if plays_before_ap is not None else "--")
+    )
+
+
+def _song_search_loop(api: BangStatsAPI, user: dict) -> None:
+    user_id = int(user["id"])
+    user_server = str(user.get("server", "en") or "en")
+    while True:
+        query = input("\nEnter song name for detailed stats (or q to go back): ").strip()
+        if query.lower() == "q":
+            return
+        if not query:
+            print("Song name cannot be empty.")
+            continue
+
+        try:
+            payload = api.search_user_stat_songs(
+                user_id,
+                query,
+                server=user_server,
+                limit=20,
+            )
+        except Exception as exc:
+            print(f"Song search failed: {exc}")
+            continue
+
+        results = payload.get("results", [])
+        if not isinstance(results, list) or not results:
+            print("No matching songs found.")
+            continue
+
+        selected = results[0]
+        if len(results) > 1:
+            print("\nMultiple matches:")
+            for idx, result in enumerate(results, start=1):
+                print(
+                    f"  {idx}. {result.get('song_name', 'Unknown')} "
+                    f"(ID: {result.get('song_id', '?')})"
+                )
+            picked = input("Pick a song by number (or q to cancel): ").strip().lower()
+            if picked == "q":
+                continue
+            if not picked.isdigit() or not (1 <= int(picked) <= len(results)):
+                print("Invalid selection.")
+                continue
+            selected = results[int(picked) - 1]
+
+        song_id = int(selected.get("song_id", 0) or 0)
+        song_name = selected.get("song_name", "Unknown")
+        if song_id <= 0:
+            print("Selected result has invalid song ID.")
+            continue
+
+        try:
+            song_payload = api.get_user_song_stats(
+                user_id,
+                song_id,
+                server=user_server,
+            )
+        except Exception as exc:
+            print(f"Unable to load song stats: {exc}")
+            continue
+
+        overview = song_payload.get("difficulty_overview", [])
+        print(f"\n{song_payload.get('song_name', song_name)}")
+        _print_song_difficulty_overview(overview if isinstance(overview, list) else [])
+
+        available_difficulties = {
+            str(item.get("difficulty", "")).lower()
+            for item in overview
+            if isinstance(item, dict) and item.get("difficulty")
+        }
+        if not available_difficulties:
+            continue
+
+        while True:
+            difficulty = input("Select difficulty (or q to cancel): ").strip().lower()
+            if difficulty == "q":
+                break
+            if difficulty not in available_difficulties:
+                print(
+                    "Invalid difficulty. Available: "
+                    + ", ".join(sorted(available_difficulties))
+                )
+                continue
+            try:
+                detail_payload = api.get_user_song_stats(
+                    user_id,
+                    song_id,
+                    server=user_server,
+                    difficulty=difficulty,
+                )
+            except Exception as exc:
+                print(f"Unable to load detailed stats: {exc}")
+                break
+            detail = detail_payload.get("detail")
+            if not isinstance(detail, dict):
+                print(f"No detailed stats found for {song_name} [{difficulty}].")
+                break
+            print(
+                f"\nDetailed stats for {detail_payload.get('song_name', song_name)} "
+                f"[{difficulty}]"
+            )
+            _print_song_difficulty_detail(detail)
+            break
+
+
 def view_stats(api: BangStatsAPI, user: dict) -> None:
     try:
         payload = api.get_user_stats(int(user["id"]))
@@ -498,6 +643,8 @@ def view_stats(api: BangStatsAPI, user: dict) -> None:
             print(
                 f"  {idx}. {row.get('song_name', 'Unknown')} ({row.get('difficulty', '--')}) - {row.get('timestamp', '--')}"
             )
+
+    _song_search_loop(api, user)
 
 
 def view_sync_jobs(api: BangStatsAPI) -> None:

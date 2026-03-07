@@ -32,6 +32,7 @@ class _FakeHttpxClient:
     def post(self, url: str, *, data=None, files=None, json=None, timeout=None):
         self.calls.append(
             {
+                "method": "post",
                 "url": url,
                 "data": data,
                 "files_count": len(files) if files else 0,
@@ -73,6 +74,69 @@ class _FakeHttpxClient:
                 }
             )
         raise AssertionError(f"Unexpected URL in fake client: {url}")
+
+    def get(self, url: str, *, params=None):
+        self.calls.append({"method": "get", "url": url, "params": params})
+        if "/stats/songs/search" in url:
+            return _FakeResponse(
+                {
+                    "query": params["q"],
+                    "limit": int(params["limit"]),
+                    "results": [
+                        {
+                            "song_id": 125,
+                            "song_name": "Unite! From A To Z",
+                        }
+                    ],
+                }
+            )
+        if "/stats/songs/" in url:
+            return _FakeResponse(
+                {
+                    "song_id": 125,
+                    "song_name": "Unite! From A To Z",
+                    "requested_difficulty": params.get("difficulty"),
+                    "difficulty_overview": [
+                        {
+                            "difficulty": "hard",
+                            "total_plays": 2,
+                            "first_played": {
+                                "timestamp": "2026-03-01T12:00:00",
+                                "filename": "a.png",
+                            },
+                        }
+                    ],
+                    "detail": {
+                        "total_plays": 2,
+                        "total_fc": 1,
+                        "total_ap": 0,
+                        "accuracy": 95.0,
+                        "first_played": {
+                            "timestamp": "2026-03-01T12:00:00",
+                            "filename": "a.png",
+                        },
+                        "last_played": {
+                            "timestamp": "2026-03-02T12:00:00",
+                            "filename": "b.png",
+                        },
+                        "first_fc": {
+                            "timestamp": "2026-03-02T12:00:00",
+                            "filename": "b.png",
+                        },
+                        "last_fc": {
+                            "timestamp": "2026-03-02T12:00:00",
+                            "filename": "b.png",
+                        },
+                        "first_ap": None,
+                        "last_ap": None,
+                        "plays_before_fc": 1,
+                        "plays_before_ap": None,
+                    }
+                    if params.get("difficulty")
+                    else None,
+                }
+            )
+        raise AssertionError(f"Unexpected URL in fake client.get: {url}")
 
     def close(self) -> None:
         return None
@@ -155,3 +219,31 @@ def test_precheck_and_local_scan_client_methods():
     )
     assert result["total_scanned"] == 1
     assert result["persisted"] == 1
+
+
+def test_song_stats_client_methods():
+    api = BangStatsAPI("http://localhost:8000")
+    fake_client = _FakeHttpxClient([])
+    api._client = fake_client
+
+    search = api.search_user_stat_songs(
+        user_id=7,
+        query="unite",
+        server="en",
+        limit=10,
+    )
+    assert search["query"] == "unite"
+    assert search["results"][0]["song_id"] == 125
+
+    overview = api.get_user_song_stats(user_id=7, song_id=125, server="en")
+    assert overview["song_id"] == 125
+    assert overview["detail"] is None
+
+    detail = api.get_user_song_stats(
+        user_id=7,
+        song_id=125,
+        server="en",
+        difficulty="hard",
+    )
+    assert detail["requested_difficulty"] == "hard"
+    assert detail["detail"]["total_plays"] == 2

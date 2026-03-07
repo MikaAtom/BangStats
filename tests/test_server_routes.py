@@ -17,6 +17,7 @@ if str(SERVER_PATH) not in sys.path:
 
 from bangstats_server.app import app
 from bangstats_server.api.routers import scans as scans_router
+from bangstats_server.api.routers import stats as stats_router
 from bangstats_server.api.routers import sync as sync_router
 
 
@@ -57,6 +58,137 @@ def test_user_crud_routes():
         )
         assert update_response.status_code == 200
         assert update_response.json()["screenshots_path"] == "/tmp/screenshots"
+
+
+def test_stats_song_search_route(monkeypatch):
+    song_a = SimpleNamespace(
+        internal_song_id=125,
+        name={"en": "Unite! From A To Z", "jp": "Unite! From A To Z"},
+    )
+    song_b = SimpleNamespace(
+        internal_song_id=812,
+        name={"en": "Unite from A to Z (Cover)"},
+    )
+
+    class _FakeSongService:
+        def search_songs_by_name(self, name_query, language="en"):
+            assert "unite" in name_query.lower()
+            if language == "en":
+                return [song_a, song_b]
+            if language == "jp":
+                return [song_a]
+            return []
+
+    monkeypatch.setattr(stats_router, "song_service", _FakeSongService())
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/users/7/stats/songs/search",
+            params={"q": "unite", "server": "en", "limit": 2},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["query"] == "unite"
+        assert payload["limit"] == 2
+        assert len(payload["results"]) == 2
+        assert {row["song_id"] for row in payload["results"]} == {125, 812}
+
+
+def test_stats_song_detail_route_with_difficulty(monkeypatch):
+    base_time = datetime(2026, 3, 1, 12, 0, 0)
+    song = SimpleNamespace(
+        internal_song_id=125,
+        name={"en": "Unite! From A To Z"},
+    )
+    hard_play_a = SimpleNamespace(
+        difficulty="hard",
+        timestamp=base_time,
+        filename="a.png",
+        perfect=100,
+        great=10,
+        good=0,
+        bad=0,
+        miss=0,
+        full_combo=False,
+        all_perfect=False,
+    )
+    hard_play_b = SimpleNamespace(
+        difficulty="hard",
+        timestamp=base_time,
+        filename="b.png",
+        perfect=110,
+        great=0,
+        good=0,
+        bad=0,
+        miss=0,
+        full_combo=True,
+        all_perfect=True,
+    )
+    expert_play = SimpleNamespace(
+        difficulty="expert",
+        timestamp=base_time,
+        filename="c.png",
+        perfect=90,
+        great=5,
+        good=0,
+        bad=0,
+        miss=0,
+        full_combo=True,
+        all_perfect=False,
+    )
+
+    class _FakeSongService:
+        def get_song_by_internal_id(self, song_id):
+            assert song_id == 125
+            return song
+
+    class _FakeScreenshotService:
+        def get_screenshots_by_song(self, user_id, song_id, difficulty=None):
+            assert user_id == 7
+            assert song_id == 125
+            if difficulty is None:
+                return [hard_play_a, hard_play_b, expert_play]
+            if difficulty == "hard":
+                return [hard_play_a, hard_play_b]
+            return []
+
+    monkeypatch.setattr(stats_router, "song_service", _FakeSongService())
+    monkeypatch.setattr(stats_router, "screenshot_service", _FakeScreenshotService())
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/users/7/stats/songs/125",
+            params={"server": "en", "difficulty": "hard"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["song_id"] == 125
+        assert payload["song_name"] == "Unite! From A To Z"
+        assert payload["requested_difficulty"] == "hard"
+        assert len(payload["difficulty_overview"]) == 2
+        assert payload["detail"]["total_plays"] == 2
+        assert payload["detail"]["total_fc"] == 1
+
+
+def test_stats_song_detail_route_returns_404_without_plays(monkeypatch):
+    class _FakeSongService:
+        def get_song_by_internal_id(self, song_id):
+            return SimpleNamespace(internal_song_id=song_id, name={"en": "Song Name"})
+
+    class _FakeScreenshotService:
+        def get_screenshots_by_song(self, user_id, song_id, difficulty=None):
+            return []
+
+    monkeypatch.setattr(stats_router, "song_service", _FakeSongService())
+    monkeypatch.setattr(stats_router, "screenshot_service", _FakeScreenshotService())
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/users/7/stats/songs/125",
+            params={"server": "en"},
+        )
+        assert response.status_code == 404
+        assert "no plays found" in response.json()["detail"].lower()
 
 
 def test_import_json_folder_route(monkeypatch):
