@@ -68,6 +68,45 @@ class ScreenshotRepository:
         )
         return self._session.exec(statement).first()
 
+    def get_existing_filenames_for_user(
+        self,
+        user_id: int,
+        filenames: List[str],
+        *,
+        chunk_size: int = 500,
+    ) -> List[str]:
+        if not isinstance(user_id, int) or user_id <= 0:
+            return []
+        if not filenames:
+            return []
+
+        sanitized = [name for name in filenames if isinstance(name, str) and name]
+        if not sanitized:
+            return []
+
+        if chunk_size <= 0:
+            chunk_size = 500
+
+        existing: List[str] = []
+        for start in range(0, len(sanitized), chunk_size):
+            chunk = sanitized[start : start + chunk_size]
+            stmt = select(Screenshot.filename).where(
+                Screenshot.user_id == user_id,
+                Screenshot.filename.in_(chunk),
+            )
+            rows = self._session.exec(stmt).all()
+            existing.extend([row for row in rows if isinstance(row, str)])
+
+        # Return unique while preserving first-seen order.
+        seen = set()
+        unique_existing: List[str] = []
+        for filename in existing:
+            if filename in seen:
+                continue
+            seen.add(filename)
+            unique_existing.append(filename)
+        return unique_existing
+
     def create(self, screenshot_data: Dict[str, Any]) -> Tuple[Optional[Screenshot], Optional[str]]:
         """
         Create a new screenshot record.

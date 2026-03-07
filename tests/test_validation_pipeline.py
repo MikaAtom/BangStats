@@ -483,3 +483,75 @@ def test_parallel_scan_aggregates_worker_results(monkeypatch, tmp_path: Path):
     assert result["persisted"] == 4
     assert result["additional"]["parallel_enabled"] is True
     assert result["additional"]["mode"] == "2x2"
+
+
+def test_compute_filename_diff_preserves_order():
+    scan_service = ScanService.__new__(ScanService)
+    scan_service.screenshot_service = SimpleNamespace(
+        get_existing_filenames_for_user=lambda _user_id, _names: ["b.png", "d.png"]
+    )
+
+    result = ScanService.compute_filename_diff(
+        scan_service,
+        user_id=3,
+        filenames=["a.png", "b.png", "c.png", "d.png"],
+    )
+
+    assert result["requested_total"] == 4
+    assert result["already_scanned_count"] == 2
+    assert result["already_scanned_filenames"] == ["b.png", "d.png"]
+    assert result["to_scan_filenames"] == ["a.png", "c.png"]
+
+
+def test_check_local_scan_path_reports_existing_directory(tmp_path: Path):
+    scan_service = ScanService.__new__(ScanService)
+    result = ScanService.check_local_scan_path(scan_service, str(tmp_path))
+    assert result["is_local"] is True
+    assert result["canonical_path"] == str(tmp_path.resolve())
+
+
+def test_scan_local_folder_reuses_scan_images(tmp_path: Path):
+    for name in ["a.png", "b.jpg", "ignore.txt"]:
+        (tmp_path / name).write_text("x", encoding="utf-8")
+
+    scan_service = ScanService.__new__(ScanService)
+    scan_service.ocr_provider = "gemini"
+    scan_service.check_local_scan_path = lambda _path: {
+        "is_local": True,
+        "canonical_path": str(tmp_path),
+    }
+    captured: dict = {}
+
+    def _fake_scan_images(**kwargs):
+        captured.update(kwargs)
+        return {
+            "total_scanned": len(kwargs["image_list"]),
+            "successful": len(kwargs["image_list"]),
+            "errors": {},
+            "error_files": {},
+            "validated": len(kwargs["image_list"]),
+            "persisted": len(kwargs["image_list"]),
+            "failed_to_persist": 0,
+            "skipped_duplicates": 0,
+            "error_rate": 0.0,
+            "additional": {"provider": "gemini"},
+        }
+
+    scan_service.scan_images = _fake_scan_images
+
+    result = ScanService.scan_local_folder(
+        scan_service,
+        user_id=5,
+        folder_path=str(tmp_path),
+        filenames=["b.jpg", "missing.png", "a.png"],
+        parallel_workers=2,
+        keys_per_worker=1,
+    )
+
+    assert result["total_scanned"] == 2
+    assert captured["images_folder"] == str(tmp_path)
+    assert captured["image_list"] == ["b.jpg", "a.png"]
+    assert captured["user_id"] == 5
+    assert captured["persist_to_db"] is True
+    assert captured["parallel_workers"] == 2
+    assert captured["keys_per_worker"] == 1

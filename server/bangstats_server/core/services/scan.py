@@ -76,6 +76,84 @@ class ScanService:
             "available_google_keys": len(self._get_available_google_keys()),
         }
 
+    def compute_filename_diff(self, *, user_id: int, filenames: List[str]) -> Dict[str, Any]:
+        requested = [Path(name).name for name in filenames if isinstance(name, str) and name]
+        if not requested:
+            return {
+                "requested_total": 0,
+                "already_scanned_count": 0,
+                "to_scan_count": 0,
+                "already_scanned_filenames": [],
+                "to_scan_filenames": [],
+            }
+
+        existing = set(self.screenshot_service.get_existing_filenames_for_user(user_id, requested))
+        already_scanned = [name for name in requested if name in existing]
+        to_scan = [name for name in requested if name not in existing]
+        return {
+            "requested_total": len(requested),
+            "already_scanned_count": len(already_scanned),
+            "to_scan_count": len(to_scan),
+            "already_scanned_filenames": already_scanned,
+            "to_scan_filenames": to_scan,
+        }
+
+    def check_local_scan_path(self, folder_path: str) -> Dict[str, Any]:
+        if not folder_path or not str(folder_path).strip():
+            return {"is_local": False, "canonical_path": None}
+        try:
+            candidate = Path(folder_path).expanduser().resolve()
+        except Exception:
+            return {"is_local": False, "canonical_path": None}
+
+        if candidate.exists() and candidate.is_dir():
+            return {"is_local": True, "canonical_path": str(candidate)}
+        return {"is_local": False, "canonical_path": None}
+
+    def scan_local_folder(
+        self,
+        *,
+        user_id: int,
+        folder_path: str,
+        filenames: List[str],
+        parallel_workers: int | None = None,
+        keys_per_worker: int | None = None,
+    ) -> Dict[str, Any]:
+        locality = self.check_local_scan_path(folder_path)
+        if not locality["is_local"] or not locality["canonical_path"]:
+            raise ValueError("Provided folder path is not accessible on this server.")
+
+        base_folder = Path(str(locality["canonical_path"]))
+        allowed_suffixes = {".png", ".jpg", ".jpeg"}
+        requested = [Path(name).name for name in filenames if isinstance(name, str) and name]
+        image_list: List[str] = []
+
+        if requested:
+            for name in requested:
+                path = base_folder / name
+                if path.exists() and path.is_file() and path.suffix.lower() in allowed_suffixes:
+                    image_list.append(name)
+        else:
+            image_list = sorted(
+                [
+                    path.name
+                    for path in base_folder.iterdir()
+                    if path.is_file() and path.suffix.lower() in allowed_suffixes
+                ]
+            )
+
+        if not image_list:
+            return self._init_results() | {"additional": {"provider": self.ocr_provider}}
+
+        return self.scan_images(
+            images_folder=str(base_folder),
+            image_list=image_list,
+            user_id=user_id,
+            persist_to_db=True,
+            parallel_workers=parallel_workers,
+            keys_per_worker=keys_per_worker,
+        )
+
     def _setup_cache_structure(self):
         """Setup cache folder structure."""
         folders = [

@@ -7,6 +7,8 @@ import httpx
 
 
 class BangStatsAPI:
+    SCAN_UPLOAD_BATCH_SIZE = 200
+
     def __init__(self, base_url: str, timeout: float = 60.0):
         self.base_url = base_url.rstrip("/")
         self._client = httpx.Client(base_url=self.base_url, timeout=timeout)
@@ -79,27 +81,138 @@ class BangStatsAPI:
         parallel_workers: int | None = None,
         keys_per_worker: int | None = None,
     ) -> dict[str, Any]:
-        files = []
-        file_handles = []
-        try:
-            for path in image_paths:
-                handle = path.open("rb")
-                file_handles.append(handle)
-                files.append(("files", (path.name, handle, "application/octet-stream")))
-            payload = {"user_id": str(user_id)}
-            if parallel_workers is not None and keys_per_worker is not None:
-                payload["parallel_workers"] = str(parallel_workers)
-                payload["keys_per_worker"] = str(keys_per_worker)
-            response = self._client.post(
-                "/api/scans",
-                data=payload,
-                files=files,
+        if not image_paths:
+            return self._init_scan_aggregate()
+
+        aggregate = self._init_scan_aggregate()
+        batch_size = self.SCAN_UPLOAD_BATCH_SIZE
+        total_batches = (len(image_paths) + batch_size - 1) // batch_size
+
+        for start in range(0, len(image_paths), batch_size):
+            batch = image_paths[start : start + batch_size]
+            files = []
+            file_handles = []
+            try:
+                for path in batch:
+                    handle = path.open("rb")
+                    file_handles.append(handle)
+                    files.append(("files", (path.name, handle, "application/octet-stream")))
+
+                payload = {"user_id": str(user_id)}
+                if parallel_workers is not None and keys_per_worker is not None:
+                    payload["parallel_workers"] = str(parallel_workers)
+                    payload["keys_per_worker"] = str(keys_per_worker)
+
+                response = self._client.post(
+                    "/api/scans",
+                    data=payload,
+                    files=files,
+                    timeout=None,
+                )
+                response.raise_for_status()
+                batch_result = response.json()
+                self._merge_scan_aggregate(aggregate, batch_result)
+            finally:
+                for handle in file_handles:
+                    handle.close()
+
+        aggregate["error_rate"] = self._calculate_error_rate(
+            total_scanned=aggregate["total_scanned"],
+            successful=aggregate["successful"],
+        )
+        additional = aggregate.setdefault("additional", {})
+        additional["upload_mode"] = "chunked" if total_batches > 1 else "single"
+        additional["upload_batches"] = total_batches
+        additional["upload_batch_size"] = batch_size
+        return aggregate
+
+    def get_scan_filename_diff(self, *, user_id: int, filenames: list[str]) -> dict[str, Any]:
+        response = self._client.post(
+            "/api/scans/filename-diff",
+            json={"user_id": user_id, "filenames": filenames},
+            timeout=None,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def check_scan_local_path(self, folder_path: str) -> dict[str, Any]:
+        response = self._client.post(
+            "/api/scans/check-local-path",
+            json={"folder_path": folder_path},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def scan_local_folder(
+        self,
+        *,
+        user_id: int,
+        folder_path: str,
+        filenames: list[str],
+        parallel_workers: int | None = None,
+        keys_per_worker: int | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "user_id": user_id,
+            "folder_path": folder_path,
+            "filenames": filenames,
+        }
+        if parallel_workers is not None and keys_per_worker is not None:
+            payload["parallel_workers"] = parallel_workers
+            payload["keys_per_worker"] = keys_per_worker
+        response = self._client.post(
+            "/api/scans/scan-local-folder",
+            json=payload,
+            timeout=None,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def _init_scan_aggregate(self) -> dict[str, Any]:
+        return {
+            "total_scanned": 0,
+            "successful": 0,
+            "errors": {},
+            "error_files": {},
+            "validated": 0,
+            "persisted": 0,
+            "failed_to_persist": 0,
+            "skipped_duplicates": 0,
+            "error_rate": 0.0,
+            "additional": {},
+        }
+
+    def _merge_scan_aggregate(self, aggregate: dict[str, Any], batch_result: dict[str, Any]) -> None:
+        for key in [
+            "total_scanned",
+            "successful",
+            "validated",
+            "persisted",
+            "failed_to_persist",
+            "skipped_duplicates",
+        ]:
+            aggregate[key] = int(aggregate.get(key, 0)) + int(batch_result.get(key, 0))
+
+        for error_type, count in (batch_result.get("errors") or {}).items():
+            aggregate["errors"][error_type] = int(aggregate["errors"].get(error_type, 0)) + int(
+                count
             )
-            response.raise_for_status()
-            return response.json()
-        finally:
-            for handle in file_handles:
-                handle.close()
+
+        for error_type, file_list in (batch_result.get("error_files") or {}).items():
+            existing = aggregate["error_files"].setdefault(error_type, [])
+            if isinstance(file_list, list):
+                existing.extend(file_list)
+
+        batch_additional = batch_result.get("additional")
+        if isinstance(batch_additional, dict):
+            for key, value in batch_additional.items():
+                aggregate["additional"].setdefault(key, value)
+
+    def _calculate_error_rate(self, *, total_scanned: int, successful: int) -> float:
+        if total_scanned <= 0:
+            return 0.0
+        failed = max(0, total_scanned - successful)
+        return (failed / total_scanned) * 100.0
 
     def import_json_folder(
         self,

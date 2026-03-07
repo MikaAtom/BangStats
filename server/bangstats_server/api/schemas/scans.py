@@ -25,6 +25,36 @@ class ScanParallelOptions(BaseModel):
     keys_per_worker: int | None = Field(default=None, ge=1)
 
 
+class FilenameDiffRequest(BaseModel):
+    user_id: int = Field(ge=1)
+    filenames: list[str] = Field(default_factory=list)
+
+
+class FilenameDiffResponse(BaseModel):
+    requested_total: int
+    already_scanned_count: int
+    to_scan_count: int
+    already_scanned_filenames: list[str] = Field(default_factory=list)
+    to_scan_filenames: list[str] = Field(default_factory=list)
+
+
+class CheckLocalPathRequest(BaseModel):
+    folder_path: str
+
+
+class CheckLocalPathResponse(BaseModel):
+    is_local: bool
+    canonical_path: str | None = None
+
+
+class ScanLocalFolderRequest(BaseModel):
+    user_id: int = Field(ge=1)
+    folder_path: str
+    filenames: list[str] = Field(default_factory=list)
+    parallel_workers: int | None = Field(default=None, ge=1)
+    keys_per_worker: int | None = Field(default=None, ge=1)
+
+
 class ImportJsonFolderRequest(BaseModel):
     user_id: int
     folder_path: str

@@ -251,6 +251,92 @@ def test_scan_capabilities_route(monkeypatch):
         assert response.json()["available_google_keys"] == 4
 
 
+def test_scan_filename_diff_route(monkeypatch):
+    class _FakeScanService:
+        def compute_filename_diff(self, *, user_id, filenames):
+            assert user_id == 3
+            assert filenames == ["a.png", "b.png", "c.png"]
+            return {
+                "requested_total": 3,
+                "already_scanned_count": 2,
+                "to_scan_count": 1,
+                "already_scanned_filenames": ["a.png", "b.png"],
+                "to_scan_filenames": ["c.png"],
+            }
+
+    monkeypatch.setattr(scans_router, "ScanService", _FakeScanService)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/scans/filename-diff",
+            json={"user_id": 3, "filenames": ["a.png", "b.png", "c.png"]},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["already_scanned_count"] == 2
+        assert payload["to_scan_filenames"] == ["c.png"]
+
+
+def test_scan_check_local_path_route(monkeypatch):
+    class _FakeScanService:
+        def check_local_scan_path(self, folder_path):
+            assert folder_path == "/srv/data/BangStats/user/screens"
+            return {"is_local": True, "canonical_path": "/srv/data/BangStats/user/screens"}
+
+    monkeypatch.setattr(scans_router, "ScanService", _FakeScanService)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/scans/check-local-path",
+            json={"folder_path": "/srv/data/BangStats/user/screens"},
+        )
+        assert response.status_code == 200
+        assert response.json()["is_local"] is True
+
+
+def test_scan_local_folder_route(monkeypatch):
+    class _FakeScanService:
+        def scan_local_folder(
+            self,
+            *,
+            user_id,
+            folder_path,
+            filenames,
+            parallel_workers,
+            keys_per_worker,
+        ):
+            assert user_id == 3
+            assert folder_path == "/srv/data/BangStats/user/screens"
+            assert filenames == ["a.png", "b.png"]
+            assert parallel_workers == 2
+            assert keys_per_worker == 1
+            return {
+                "total_scanned": 2,
+                "successful": 2,
+                "errors": {},
+                "error_files": {},
+                "validated": 2,
+                "persisted": 2,
+                "failed_to_persist": 0,
+                "skipped_duplicates": 0,
+                "error_rate": 0.0,
+                "additional": {"provider": "gemini"},
+            }
+
+    monkeypatch.setattr(scans_router, "ScanService", _FakeScanService)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/scans/scan-local-folder",
+            json={
+                "user_id": 3,
+                "folder_path": "/srv/data/BangStats/user/screens",
+                "filenames": ["a.png", "b.png"],
+                "parallel_workers": 2,
+                "keys_per_worker": 1,
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["total_scanned"] == 2
+
+
 def test_scan_route_accepts_parallel_form_options(monkeypatch):
     class _FakeScanService:
         def scan_images(

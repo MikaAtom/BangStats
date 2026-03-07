@@ -80,6 +80,18 @@ class ScreenshotService:
         logger.debug(f"Found {len(all_results)} screenshots across available difficulties")
         return all_results
 
+    def get_existing_filenames_for_user(
+        self,
+        user_id: int,
+        filenames: List[str],
+    ) -> List[str]:
+        if not isinstance(user_id, int) or user_id <= 0:
+            logger.warning(f"Invalid user_id provided: {user_id}")
+            return []
+        if not filenames:
+            return []
+        return self._repo.get_existing_filenames_for_user(user_id, filenames)
+
     def create_screenshot(self, screenshot_data: Dict[str, Any]) -> Optional[Screenshot]:
         """
         Create a new screenshot with validation.

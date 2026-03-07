@@ -97,6 +97,33 @@ def scan_screenshots(
         return
 
     print(f"Found {len(images)} images in {screenshots_dir}.")
+    image_filenames = [path.name for path in images]
+    try:
+        diff = api.get_scan_filename_diff(
+            user_id=int(user["id"]),
+            filenames=image_filenames,
+        )
+    except Exception as exc:
+        print(f"Filename precheck failed, continuing with full scan: {exc}")
+        diff = {
+            "requested_total": len(image_filenames),
+            "already_scanned_count": 0,
+            "to_scan_count": len(image_filenames),
+            "to_scan_filenames": image_filenames,
+        }
+
+    to_scan_filenames = diff.get("to_scan_filenames", image_filenames)
+    requested_total = int(diff.get("requested_total", len(image_filenames)) or 0)
+    already_scanned = int(diff.get("already_scanned_count", 0) or 0)
+    to_scan_count = int(diff.get("to_scan_count", len(to_scan_filenames)) or 0)
+    print(
+        "Precheck summary: "
+        f"requested={requested_total}, already_scanned={already_scanned}, to_scan={to_scan_count}"
+    )
+    if to_scan_count <= 0:
+        print("All files are already scanned. Nothing to do.")
+        return
+
     parallel_workers = None
     keys_per_worker = None
     try:
@@ -138,12 +165,32 @@ def scan_screenshots(
                 print("Invalid parallel mode; falling back to single-worker scan.")
 
     print("Starting scan...")
-    scan_result = api.scan_images(
-        int(user["id"]),
-        images,
-        parallel_workers=parallel_workers,
-        keys_per_worker=keys_per_worker,
-    )
+    try:
+        locality = api.check_scan_local_path(str(screenshots_dir))
+    except Exception as exc:
+        print(f"Server path locality check failed, using upload fallback: {exc}")
+        locality = {"is_local": False, "canonical_path": None}
+
+    if locality.get("is_local"):
+        server_path = locality.get("canonical_path") or str(screenshots_dir)
+        print(f"Server-local path detected, scanning directly on server: {server_path}")
+        scan_result = api.scan_local_folder(
+            user_id=int(user["id"]),
+            folder_path=server_path,
+            filenames=to_scan_filenames,
+            parallel_workers=parallel_workers,
+            keys_per_worker=keys_per_worker,
+        )
+    else:
+        to_scan_set = set(to_scan_filenames)
+        filtered_images = [path for path in images if path.name in to_scan_set]
+        print(f"Path is not local to server; uploading {len(filtered_images)} files.")
+        scan_result = api.scan_images(
+            int(user["id"]),
+            filtered_images,
+            parallel_workers=parallel_workers,
+            keys_per_worker=keys_per_worker,
+        )
     print("Scan completed. Results:")
     print(f"Total images scanned: {scan_result.get('total_scanned', 0)}")
     print(f"Successful scans: {scan_result.get('successful', 0)}")

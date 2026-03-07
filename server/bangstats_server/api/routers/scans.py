@@ -5,19 +5,63 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from bangstats_server.api.schemas.scans import (
+    CheckLocalPathRequest,
+    CheckLocalPathResponse,
     ErrorCategoryActionRequest,
     ErrorCategoryActionResponse,
     ErrorCorrectionRequest,
     ErrorCorrectionResponse,
     ErrorDetailResponse,
     ErrorListResponse,
+    FilenameDiffRequest,
+    FilenameDiffResponse,
     ImportJsonFolderRequest,
+    ScanLocalFolderRequest,
     ScanCapabilitiesResponse,
     ScanResponse,
 )
 from bangstats_server.core.services.scan import ScanService
 
 router = APIRouter()
+
+
+@router.post("/scans/filename-diff", response_model=FilenameDiffResponse)
+def get_scan_filename_diff(data: FilenameDiffRequest):
+    try:
+        scan_service = ScanService()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return scan_service.compute_filename_diff(
+        user_id=data.user_id,
+        filenames=data.filenames,
+    )
+
+
+@router.post("/scans/check-local-path", response_model=CheckLocalPathResponse)
+def check_scan_local_path(data: CheckLocalPathRequest):
+    try:
+        scan_service = ScanService()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return scan_service.check_local_scan_path(data.folder_path)
+
+
+@router.post("/scans/scan-local-folder", response_model=ScanResponse)
+def scan_local_folder(data: ScanLocalFolderRequest):
+    try:
+        scan_service = ScanService()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    try:
+        return scan_service.scan_local_folder(
+            user_id=data.user_id,
+            folder_path=data.folder_path,
+            filenames=data.filenames,
+            parallel_workers=data.parallel_workers,
+            keys_per_worker=data.keys_per_worker,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/scans", response_model=ScanResponse)
