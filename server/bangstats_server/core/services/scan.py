@@ -124,7 +124,7 @@ class ScanService:
             raise ValueError("Provided folder path is not accessible on this server.")
 
         base_folder = Path(str(locality["canonical_path"]))
-        allowed_suffixes = {".png", ".jpg", ".jpeg"}
+        allowed_suffixes = {".png", ".jpg", ".jpeg", ".heic", ".heif"}
         requested = [Path(name).name for name in filenames if isinstance(name, str) and name]
         image_list: List[str] = []
 
@@ -405,6 +405,8 @@ class ScanService:
             error_dir / f"{stem}.png",
             error_dir / f"{stem}.jpg",
             error_dir / f"{stem}.jpeg",
+            error_dir / f"{stem}.heic",
+            error_dir / f"{stem}.heif",
         ]
         for candidate in candidates:
             if candidate.exists():
@@ -468,6 +470,8 @@ class ScanService:
             error_dir / f"{Path(json_filename).stem}.png",
             error_dir / f"{Path(json_filename).stem}.jpg",
             error_dir / f"{Path(json_filename).stem}.jpeg",
+            error_dir / f"{Path(json_filename).stem}.heic",
+            error_dir / f"{Path(json_filename).stem}.heif",
         ]
 
         for candidate in [json_path, validation_path, *image_candidates]:

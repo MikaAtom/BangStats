@@ -511,7 +511,7 @@ def test_check_local_scan_path_reports_existing_directory(tmp_path: Path):
 
 
 def test_scan_local_folder_reuses_scan_images(tmp_path: Path):
-    for name in ["a.png", "b.jpg", "ignore.txt"]:
+    for name in ["a.png", "b.jpg", "c.heic", "ignore.txt"]:
         (tmp_path / name).write_text("x", encoding="utf-8")
 
     scan_service = ScanService.__new__(ScanService)
@@ -543,14 +543,14 @@ def test_scan_local_folder_reuses_scan_images(tmp_path: Path):
         scan_service,
         user_id=5,
         folder_path=str(tmp_path),
-        filenames=["b.jpg", "missing.png", "a.png"],
+        filenames=["b.jpg", "c.heic", "missing.png", "a.png"],
         parallel_workers=2,
         keys_per_worker=1,
     )
 
-    assert result["total_scanned"] == 2
+    assert result["total_scanned"] == 3
     assert captured["images_folder"] == str(tmp_path)
-    assert captured["image_list"] == ["b.jpg", "a.png"]
+    assert captured["image_list"] == ["b.jpg", "c.heic", "a.png"]
     assert captured["user_id"] == 5
     assert captured["persist_to_db"] is True
     assert captured["parallel_workers"] == 2

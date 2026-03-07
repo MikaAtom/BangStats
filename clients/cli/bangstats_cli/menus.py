@@ -85,11 +85,12 @@ def scan_screenshots(
         screenshots_path = input("Path does not exist. Enter screenshots directory: ").strip()
         screenshots_dir = Path(screenshots_path).expanduser()
 
+    allowed_suffixes = {".png", ".jpg", ".jpeg", ".heic", ".heif"}
     images = sorted(
         [
             path
             for path in screenshots_dir.iterdir()
-            if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg"}
+            if path.is_file() and path.suffix.lower() in allowed_suffixes
         ]
     )
     if not images:

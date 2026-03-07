@@ -1,5 +1,7 @@
 from google import genai
+from io import BytesIO
 import json
+from pathlib import Path
 from typing import Optional
 
 from bangstats_server.core.config import GOOGLE_API_KEY
@@ -42,6 +44,44 @@ class GoogleModelService:
             if "generateContent" in model.supported_actions
         ]
 
+    def _resolve_mime_type(self, image_path: str) -> str:
+        suffix = Path(image_path).suffix.lower()
+        mapping = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".heic": "image/heic",
+            ".heif": "image/heif",
+        }
+        return mapping.get(suffix, "application/octet-stream")
+
+    def _convert_heic_to_png_bytes(self, image_path: str) -> bytes:
+        try:
+            import pillow_heif
+            from PIL import Image
+        except ImportError as exc:
+            raise RuntimeError(
+                "HEIC/HEIF support requires Pillow and pillow-heif. Install dependencies and retry."
+            ) from exc
+
+        try:
+            pillow_heif.register_heif_opener()
+            with Image.open(image_path) as image:
+                converted = image.convert("RGB")
+                with BytesIO() as output:
+                    converted.save(output, format="PNG")
+                    return output.getvalue()
+        except Exception as exc:
+            raise RuntimeError(f"Failed to convert HEIC/HEIF image: {exc}") from exc
+
+    def _prepare_image_payload(self, image_path: str) -> tuple[bytes, str]:
+        mime_type = self._resolve_mime_type(image_path)
+        if mime_type in {"image/heic", "image/heif"}:
+            return self._convert_heic_to_png_bytes(image_path), "image/png"
+
+        with open(image_path, "rb") as image_file:
+            return image_file.read(), mime_type
+
     def generate_response(self, model: str, prompt: str, image_path: str) -> dict:
         """
         Generates a response using the specified model, prompt, and image.
@@ -54,8 +94,7 @@ class GoogleModelService:
         Returns:
             dict: The JSON response from the model.
         """
-        with open(image_path, "rb") as image_file:
-            image_bytes = image_file.read()
+        image_bytes, mime_type = self._prepare_image_payload(image_path)
 
         config = genai.types.GenerateContentConfig(temperature=0.7)
 
@@ -65,7 +104,7 @@ class GoogleModelService:
                 parts=[
                     genai.types.Part.from_text(text=prompt),
                     genai.types.Part.from_bytes(
-                        data=image_bytes, mime_type="image/png"
+                        data=image_bytes, mime_type=mime_type
                     ),
                 ],
             ),
