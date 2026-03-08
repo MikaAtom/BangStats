@@ -396,6 +396,30 @@ class BangStatsAPI:
         response.raise_for_status()
         return response.json()
 
+    def get_user_stats_insights(
+        self,
+        user_id: int,
+        *,
+        preset: str | None = "30d",
+        from_date: str | None = None,
+        to_date: str | None = None,
+        session_gap_minutes: int = 45,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"session_gap_minutes": session_gap_minutes}
+        if from_date or to_date:
+            if from_date:
+                params["from_date"] = from_date
+            if to_date:
+                params["to_date"] = to_date
+        elif preset:
+            params["preset"] = preset
+        response = self._client.get(
+            f"/api/users/{user_id}/stats/insights",
+            params=params,
+        )
+        response.raise_for_status()
+        return response.json()
+
     def flush(
         self,
         *,

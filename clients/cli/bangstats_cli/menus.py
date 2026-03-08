@@ -725,6 +725,137 @@ def _view_stats_calendar(api: BangStatsAPI, user: dict) -> None:
         )
 
 
+def _view_stats_insights(api: BangStatsAPI, user: dict) -> None:
+    print("\nInsights range")
+    print("  1. Last 7 days")
+    print("  2. Last 30 days")
+    print("  3. Last 90 days")
+    print("  4. Custom range")
+    choice = input("Select range (or q to go back): ").strip().lower()
+    if choice == "q":
+        return
+
+    session_gap_raw = input("Session gap in minutes [45]: ").strip()
+    try:
+        session_gap = int(session_gap_raw) if session_gap_raw else 45
+        if session_gap < 5 or session_gap > 240:
+            raise ValueError
+    except ValueError:
+        print("Invalid session gap, using default 45.")
+        session_gap = 45
+
+    try:
+        if choice == "1":
+            payload = api.get_user_stats_insights(
+                int(user["id"]),
+                preset="7d",
+                session_gap_minutes=session_gap,
+            )
+        elif choice == "2":
+            payload = api.get_user_stats_insights(
+                int(user["id"]),
+                preset="30d",
+                session_gap_minutes=session_gap,
+            )
+        elif choice == "3":
+            payload = api.get_user_stats_insights(
+                int(user["id"]),
+                preset="90d",
+                session_gap_minutes=session_gap,
+            )
+        elif choice == "4":
+            from_date = input("From date (YYYY-MM-DD): ").strip()
+            to_date = input("To date (YYYY-MM-DD): ").strip()
+            payload = api.get_user_stats_insights(
+                int(user["id"]),
+                preset=None,
+                from_date=from_date,
+                to_date=to_date,
+                session_gap_minutes=session_gap,
+            )
+        else:
+            print("Invalid option.")
+            return
+    except Exception as exc:
+        print(f"Unable to fetch insights: {exc}")
+        return
+
+    print(
+        f"\nInsights {payload.get('from_date', '--')} -> {payload.get('to_date', '--')} "
+        f"(session gap: {payload.get('session_gap_minutes', session_gap)}m)"
+    )
+    data_quality = payload.get("data_quality", {})
+    if data_quality.get("sparse_data"):
+        print(
+            "  Data quality: sparse "
+            f"({data_quality.get('observed_plays', 0)}/"
+            f"{data_quality.get('min_recommended_plays', 0)} recommended plays)"
+        )
+    else:
+        print("  Data quality: sufficient")
+
+    sessions = payload.get("sessions", {})
+    print("\nSession habits")
+    print(f"  Total sessions: {sessions.get('total_sessions', 0)}")
+    print(f"  Avg session length: {sessions.get('avg_session_minutes', 0.0)} min")
+    print(f"  Avg plays/session: {sessions.get('avg_plays_per_session', 0.0)}")
+    print(f"  Longest session: {sessions.get('longest_session_minutes', 0)} min")
+    print(f"  Longest session plays: {sessions.get('longest_session_plays', 0)}")
+    print(f"  Recent cadence: every {sessions.get('recent_cadence_days', 0.0)} days")
+
+    recent_sessions = payload.get("recent_sessions", [])
+    if recent_sessions:
+        print("\nRecent sessions")
+        for item in recent_sessions:
+            print(
+                f"  {item.get('started_at', '--')} -> {item.get('ended_at', '--')} | "
+                f"plays={item.get('plays', 0)} unique_songs={item.get('unique_songs', 0)} "
+                f"duration={item.get('duration_minutes', 0)}m"
+            )
+
+    practice_periods = payload.get("practice_periods", [])
+    print("\nTop practiced songs")
+    if not practice_periods:
+        print("  No dense practice periods detected.")
+    else:
+        for row in practice_periods:
+            song_label = row.get("song_name") or f"Song {row.get('song_id')}"
+            print(
+                f"  {song_label} | "
+                f"bursts={row.get('burst_count', 0)} "
+                f"max_burst={row.get('max_burst_plays', 0)} "
+                f"plays={row.get('total_plays', 0)} "
+                f"time={row.get('estimated_time_played_human', '0m')}"
+            )
+
+    repetition = payload.get("repetition", {})
+    print("\nRepetition")
+    print(
+        f"  Repeated plays: {repetition.get('repeated_plays', 0)}/"
+        f"{repetition.get('total_plays', 0)} "
+        f"({round(float(repetition.get('repeated_ratio', 0.0)) * 100, 1)}%)"
+    )
+    for row in repetition.get("most_looped_songs", [])[:3]:
+        song_label = row.get("song_name") or f"Song {row.get('song_id')}"
+        print(
+            f"  Loop: {song_label} | "
+            f"repeat_ratio={round(float(row.get('repeat_ratio', 0.0)) * 100, 1)}% "
+            f"plays={row.get('play_count', 0)} "
+            f"time={row.get('estimated_time_played_human', '0m')}"
+        )
+
+    recommendations = payload.get("recommendations", [])
+    if recommendations:
+        print("\nRecommendations")
+        for rec in recommendations:
+            target = (
+                f" ({rec.get('song_name')})"
+                if rec.get("song_name")
+                else (f" (Song {rec.get('song_id')})" if rec.get("song_id") else "")
+            )
+            print(f"  - {rec.get('title', '--')}{target}: {rec.get('detail', '--')}")
+
+
 def _stats_views_loop(api: BangStatsAPI, user: dict) -> None:
     while True:
         print("\nStats views")
@@ -732,6 +863,7 @@ def _stats_views_loop(api: BangStatsAPI, user: dict) -> None:
         print("  2. Historic milestones")
         print("  3. Activity ranges")
         print("  4. Calendar view")
+        print("  5. Insights")
         print("  q. Back to dashboard")
         choice = input("Choose stats view: ").strip().lower()
         if choice == "q":
@@ -744,6 +876,8 @@ def _stats_views_loop(api: BangStatsAPI, user: dict) -> None:
             _view_stats_activity(api, user)
         elif choice == "4":
             _view_stats_calendar(api, user)
+        elif choice == "5":
+            _view_stats_insights(api, user)
         else:
             print("Invalid choice.")
 

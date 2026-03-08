@@ -6,6 +6,7 @@ from bangstats_server.core.services.stats import (
     compute_calendar_month_view,
     compute_difficulty_detail,
     compute_general_summary,
+    compute_insights,
     compute_milestones,
     compute_recent_plays,
     compute_song_difficulty_overview,
@@ -121,9 +122,10 @@ def test_song_difficulty_overview():
         _play(song_id=1, difficulty="hard", timestamp=base + timedelta(days=1), filename="hard.png"),
         _play(song_id=1, difficulty="expert", timestamp=base + timedelta(days=2), filename="exp.png"),
     ]
-    overview = compute_song_difficulty_overview(plays)
+    overview = compute_song_difficulty_overview(plays, song_length_seconds=120)
     assert set(overview.keys()) == {"easy", "hard", "expert"}
     assert overview["easy"]["first_played"]["filename"] == "easy.png"
+    assert overview["hard"]["estimated_time_played_seconds"] == 120
 
 
 def test_compute_milestones_includes_firsts_by_difficulty_and_thresholds():
@@ -185,3 +187,32 @@ def test_compute_calendar_month_view_aggregates_days():
     assert result["total_days_with_plays"] == 2
     assert result["days"][0]["date"] == "2026-04-02"
     assert result["days"][0]["plays"] == 2
+
+
+def test_compute_insights_sessionization_practice_repetition_and_guards():
+    base = datetime(2026, 3, 10, 12, 0, 0)
+    plays = [
+        _play(song_id=1, difficulty="expert", timestamp=base),
+        _play(song_id=1, difficulty="expert", timestamp=base + timedelta(minutes=10)),
+        _play(song_id=1, difficulty="expert", timestamp=base + timedelta(minutes=20)),
+        _play(song_id=2, difficulty="hard", timestamp=base + timedelta(hours=2)),
+        _play(song_id=2, difficulty="hard", timestamp=base + timedelta(hours=2, minutes=8)),
+        _play(song_id=1, difficulty="expert", timestamp=base + timedelta(days=2)),
+    ]
+    result = compute_insights(
+        plays,
+        from_date=base.date(),
+        to_date=(base + timedelta(days=3)).date(),
+        session_gap_minutes=45,
+        song_lengths_seconds={1: 120, 2: 150},
+        min_recommended_plays=10,
+    )
+    assert result["sessions"]["total_sessions"] == 3
+    assert len(result["practice_periods"]) == 1
+    assert result["practice_periods"][0]["song_id"] == 1
+    assert result["practice_periods"][0]["max_burst_plays"] == 3
+    assert result["practice_periods"][0]["estimated_time_played_seconds"] == 480
+    assert result["repetition"]["repeated_plays"] == 3
+    assert result["repetition"]["most_looped_songs"][0]["song_id"] in {1, 2}
+    assert result["data_quality"]["sparse_data"] is True
+    assert len(result["recommendations"]) >= 1

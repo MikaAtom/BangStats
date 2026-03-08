@@ -99,6 +99,7 @@ def test_stats_song_detail_route_with_difficulty(monkeypatch):
     song = SimpleNamespace(
         internal_song_id=125,
         name={"en": "Unite! From A To Z"},
+        length=120.0,
     )
     hard_play_a = SimpleNamespace(
         difficulty="hard",
@@ -166,8 +167,10 @@ def test_stats_song_detail_route_with_difficulty(monkeypatch):
         assert payload["song_name"] == "Unite! From A To Z"
         assert payload["requested_difficulty"] == "hard"
         assert len(payload["difficulty_overview"]) == 2
+        assert payload["difficulty_overview"][0]["estimated_time_played_seconds"] >= 240
         assert payload["detail"]["total_plays"] == 2
         assert payload["detail"]["total_fc"] == 1
+        assert payload["detail"]["estimated_time_played_seconds"] == 240
 
 
 def test_stats_song_detail_route_returns_404_without_plays(monkeypatch):
@@ -300,6 +303,80 @@ def test_stats_calendar_route(monkeypatch):
         payload = response.json()
         assert payload["year"] == 2026
         assert payload["month"] == 3
+
+
+def test_stats_insights_route(monkeypatch):
+    base = datetime(2026, 3, 10, 12, 0, 0)
+    plays = [
+        SimpleNamespace(
+            song_id=10,
+            difficulty="expert",
+            timestamp=base,
+            perfect=100,
+            great=0,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=True,
+            all_perfect=False,
+            filename="a.png",
+        ),
+        SimpleNamespace(
+            song_id=10,
+            difficulty="expert",
+            timestamp=base,
+            perfect=100,
+            great=0,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=True,
+            all_perfect=False,
+            filename="b.png",
+        ),
+        SimpleNamespace(
+            song_id=11,
+            difficulty="hard",
+            timestamp=base,
+            perfect=100,
+            great=0,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=True,
+            all_perfect=False,
+            filename="c.png",
+        ),
+    ]
+
+    class _FakeScreenshotService:
+        def get_screenshots_by_user(self, _user_id):
+            return plays
+
+    class _FakeSongService:
+        def get_song_by_internal_id(self, song_id):
+            if song_id == 10:
+                return SimpleNamespace(internal_song_id=10, name={"en": "Song Ten"}, length=120.0)
+            if song_id == 11:
+                return SimpleNamespace(internal_song_id=11, name={"en": "Song Eleven"}, length=150.0)
+            return None
+
+    monkeypatch.setattr(stats_router, "screenshot_service", _FakeScreenshotService())
+    monkeypatch.setattr(stats_router, "song_service", _FakeSongService())
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/users/7/stats/insights",
+            params={
+                "from_date": "2026-03-01",
+                "to_date": "2026-03-31",
+                "session_gap_minutes": 45,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["data_quality"]["observed_plays"] == 3
+        assert payload["session_gap_minutes"] == 45
+        assert isinstance(payload["repetition"]["most_looped_songs"], list)
 
 
 def test_import_json_folder_route(monkeypatch):

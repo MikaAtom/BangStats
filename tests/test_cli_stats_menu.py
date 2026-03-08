@@ -196,6 +196,93 @@ class _FakeStatsAPI:
             ],
         }
 
+    def get_user_stats_insights(
+        self,
+        user_id: int,
+        *,
+        preset: str | None = "30d",
+        from_date: str | None = None,
+        to_date: str | None = None,
+        session_gap_minutes: int = 45,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "get_user_stats_insights",
+                {
+                    "user_id": user_id,
+                    "preset": preset,
+                    "from_date": from_date,
+                    "to_date": to_date,
+                    "session_gap_minutes": session_gap_minutes,
+                },
+            )
+        )
+        return {
+            "from_date": "2026-03-01",
+            "to_date": "2026-03-31",
+            "session_gap_minutes": session_gap_minutes,
+            "data_quality": {
+                "observed_plays": 12,
+                "min_recommended_plays": 10,
+                "sparse_data": False,
+            },
+            "sessions": {
+                "total_sessions": 4,
+                "avg_session_minutes": 18.5,
+                "avg_plays_per_session": 3.0,
+                "longest_session_minutes": 42,
+                "longest_session_plays": 5,
+                "recent_cadence_days": 1.8,
+            },
+            "recent_sessions": [
+                {
+                    "started_at": "2026-03-10T12:00:00",
+                    "ended_at": "2026-03-10T12:30:00",
+                    "plays": 4,
+                    "unique_songs": 2,
+                    "duration_minutes": 30,
+                }
+            ],
+            "practice_periods": [
+                {
+                    "song_id": 125,
+                    "song_name": "Unite! From A To Z",
+                    "total_plays": 6,
+                    "burst_count": 2,
+                    "max_burst_plays": 4,
+                    "latest_burst_at": "2026-03-10T12:25:00",
+                    "estimated_time_played_seconds": 720,
+                    "estimated_time_played_human": "12m",
+                }
+            ],
+            "repetition": {
+                "total_plays": 12,
+                "repeated_plays": 5,
+                "repeated_ratio": 0.417,
+                "most_looped_songs": [
+                    {
+                        "song_id": 125,
+                        "song_name": "Unite! From A To Z",
+                        "play_count": 6,
+                        "repeated_plays": 3,
+                        "repeat_ratio": 0.5,
+                        "max_gap_days": 2.5,
+                        "estimated_time_played_seconds": 720,
+                        "estimated_time_played_human": "12m",
+                    }
+                ],
+                "revisited_after_break": [],
+            },
+            "recommendations": [
+                {
+                    "title": "Focused practice pattern",
+                    "detail": "Song 125 shows 2 dense practice periods.",
+                    "song_id": 125,
+                    "song_name": "Unite! From A To Z",
+                }
+            ],
+        }
+
 
 def test_view_stats_song_search_flow(monkeypatch, capsys):
     api = _FakeStatsAPI()
@@ -252,3 +339,23 @@ def test_view_stats_milestones_activity_calendar(monkeypatch, capsys):
     assert "Milestones" in output
     assert "Activity 2026-03-01 -> 2026-03-31" in output
     assert "Calendar 2026-03" in output
+
+
+def test_view_stats_insights(monkeypatch, capsys):
+    api = _FakeStatsAPI()
+    prompts = iter(
+        [
+            "5",  # insights
+            "2",  # last 30 days
+            "45",  # session gap
+            "q",  # exit stats loop
+        ]
+    )
+    monkeypatch.setattr(builtins, "input", lambda _prompt="": next(prompts))
+    view_stats(api, {"id": 7, "server": "en"})
+    output = capsys.readouterr().out
+    assert "Insights 2026-03-01 -> 2026-03-31" in output
+    assert "Session habits" in output
+    assert "Top practiced songs" in output
+    assert "Repetition" in output
+    assert any(name == "get_user_stats_insights" for name, _ in api.calls)

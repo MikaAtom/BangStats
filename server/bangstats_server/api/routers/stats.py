@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from bangstats_server.api.schemas.stats import (
     StatsActivityRangeResponse,
     StatsCalendarResponse,
+    StatsInsightsResponse,
     StatsMilestonesResponse,
     SongDifficultyDetail,
     SongDifficultyOverviewItem,
@@ -20,6 +21,7 @@ from bangstats_server.core.services.stats import (
     compute_calendar_month_view,
     compute_difficulty_detail,
     compute_general_summary,
+    compute_insights,
     compute_milestones,
     compute_recent_plays,
     compute_song_difficulty_overview,
@@ -69,6 +71,14 @@ def _parse_iso_date(value: str, field_name: str):
         return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid {field_name}: {value}") from exc
+
+
+def _song_length_seconds(song: object | None) -> int:
+    raw = getattr(song, "length", 0)
+    try:
+        return max(0, int(round(float(raw))))
+    except (TypeError, ValueError):
+        return 0
 
 
 @router.get("/users/{user_id}/stats", response_model=StatsResponse)
@@ -153,12 +163,17 @@ def get_user_song_stats(
     if not song_plays:
         raise HTTPException(status_code=404, detail=f"No plays found for {song_name}")
 
-    overview_map = compute_song_difficulty_overview(song_plays)
+    overview_map = compute_song_difficulty_overview(
+        song_plays,
+        song_length_seconds=_song_length_seconds(song),
+    )
     overview = [
         SongDifficultyOverviewItem(
             difficulty=diff,
             total_plays=int(payload.get("total_plays", 0)),
             first_played=payload.get("first_played"),
+            estimated_time_played_seconds=int(payload.get("estimated_time_played_seconds", 0)),
+            estimated_time_played_human=str(payload.get("estimated_time_played_human", "0m")),
         )
         for diff, payload in sorted(
             overview_map.items(),
@@ -179,7 +194,12 @@ def get_user_song_stats(
                 status_code=404,
                 detail=f"No plays found for {song_name} [{normalized_difficulty}]",
             )
-        detail = SongDifficultyDetail(**compute_difficulty_detail(plays))
+        detail = SongDifficultyDetail(
+            **compute_difficulty_detail(
+                plays,
+                song_length_seconds=_song_length_seconds(song),
+            )
+        )
 
     return SongStatsResponse(
         song_id=song_id,
@@ -259,3 +279,73 @@ def get_user_stats_calendar(
             month=selected_month,
         )
     )
+
+
+@router.get("/users/{user_id}/stats/insights", response_model=StatsInsightsResponse)
+def get_user_stats_insights(
+    user_id: int,
+    preset: str = Query("30d"),
+    from_date: str | None = Query(None),
+    to_date: str | None = Query(None),
+    session_gap_minutes: int = Query(45, ge=5, le=240),
+):
+    screenshots = screenshot_service.get_screenshots_by_user(user_id)
+    if not screenshots:
+        raise HTTPException(status_code=404, detail="No screenshots for this user")
+
+    today = datetime.now(timezone.utc).date()
+    if from_date or to_date:
+        if not from_date or not to_date:
+            raise HTTPException(
+                status_code=400,
+                detail="Both from_date and to_date are required for custom range",
+            )
+        range_start = _parse_iso_date(from_date, "from_date")
+        range_end = _parse_iso_date(to_date, "to_date")
+    else:
+        presets = {"7d": 7, "30d": 30, "90d": 90}
+        days = presets.get(preset)
+        if days is None:
+            raise HTTPException(status_code=400, detail=f"Invalid preset: {preset}")
+        range_end = today
+        range_start = today - timedelta(days=days - 1)
+
+    if range_start > range_end:
+        raise HTTPException(status_code=400, detail="from_date must be <= to_date")
+
+    song_ids = {
+        int(getattr(screenshot, "song_id", 0))
+        for screenshot in screenshots
+        if int(getattr(screenshot, "song_id", 0)) > 0
+    }
+    song_map = {
+        song_id: song_service.get_song_by_internal_id(song_id)
+        for song_id in song_ids
+    }
+    song_lengths_seconds = {
+        song_id: _song_length_seconds(song)
+        for song_id, song in song_map.items()
+    }
+
+    payload = compute_insights(
+        screenshots,
+        from_date=range_start,
+        to_date=range_end,
+        session_gap_minutes=session_gap_minutes,
+        song_lengths_seconds=song_lengths_seconds,
+    )
+
+    for item in payload.get("practice_periods", []):
+        song_id = int(item.get("song_id", 0) or 0)
+        item["song_name"] = _song_display_name(song_map.get(song_id), "en") if song_id > 0 else None
+    repetition = payload.get("repetition", {})
+    for key in ("most_looped_songs", "revisited_after_break"):
+        for item in repetition.get(key, []):
+            song_id = int(item.get("song_id", 0) or 0)
+            item["song_name"] = _song_display_name(song_map.get(song_id), "en") if song_id > 0 else None
+    for rec in payload.get("recommendations", []):
+        song_id = int(rec.get("song_id", 0) or 0)
+        if song_id > 0:
+            rec["song_name"] = _song_display_name(song_map.get(song_id), "en")
+
+    return StatsInsightsResponse(**payload)
