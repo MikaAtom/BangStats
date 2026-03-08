@@ -93,7 +93,7 @@ def test_difficulty_detail_fc_ap():
         _play(song_id=1, difficulty="hard", timestamp=base + timedelta(days=1), full_combo=True, all_perfect=False, filename="2.png"),
         _play(song_id=1, difficulty="hard", timestamp=base + timedelta(days=2), full_combo=True, all_perfect=True, filename="3.png"),
     ]
-    detail = compute_difficulty_detail(plays)
+    detail = compute_difficulty_detail(plays, song_length_seconds=120, session_gap_minutes=45)
     assert detail["total_plays"] == 3
     assert detail["total_fc"] == 2
     assert detail["total_ap"] == 1
@@ -101,6 +101,9 @@ def test_difficulty_detail_fc_ap():
     assert detail["plays_before_ap"] == 2
     assert detail["first_fc"]["filename"] == "2.png"
     assert detail["first_ap"]["filename"] == "3.png"
+    assert detail["estimated_time_played_seconds"] == 360
+    assert detail["total_sessions"] == 3
+    assert detail["practice_burst_count"] == 0
 
 
 def test_difficulty_detail_no_fc():

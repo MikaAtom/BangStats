@@ -171,6 +171,7 @@ def test_stats_song_detail_route_with_difficulty(monkeypatch):
         assert payload["detail"]["total_plays"] == 2
         assert payload["detail"]["total_fc"] == 1
         assert payload["detail"]["estimated_time_played_seconds"] == 240
+        assert payload["detail"]["total_sessions"] >= 1
 
 
 def test_stats_song_detail_route_returns_404_without_plays(monkeypatch):

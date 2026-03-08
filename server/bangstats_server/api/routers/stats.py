@@ -152,6 +152,7 @@ def get_user_song_stats(
     user_id: int,
     song_id: int,
     difficulty: str | None = Query(None),
+    session_gap_minutes: int = Query(45, ge=5, le=240),
     server: str = Query("en", min_length=2, max_length=2),
 ):
     song = song_service.get_song_by_internal_id(song_id)
@@ -198,6 +199,7 @@ def get_user_song_stats(
             **compute_difficulty_detail(
                 plays,
                 song_length_seconds=_song_length_seconds(song),
+                session_gap_minutes=session_gap_minutes,
             )
         )
 

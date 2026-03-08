@@ -105,7 +105,12 @@ def compute_song_difficulty_overview(
     return result
 
 
-def compute_difficulty_detail(plays: List[Any], *, song_length_seconds: int = 0) -> Dict[str, Any]:
+def compute_difficulty_detail(
+    plays: List[Any],
+    *,
+    song_length_seconds: int = 0,
+    session_gap_minutes: int = 45,
+) -> Dict[str, Any]:
     ordered = sorted(plays, key=lambda p: getattr(p, "timestamp", datetime.min))
     total_plays = len(ordered)
     total_fc = sum(1 for p in ordered if bool(getattr(p, "full_combo", False)))
@@ -133,6 +138,16 @@ def compute_difficulty_detail(plays: List[Any], *, song_length_seconds: int = 0)
             None,
         )
 
+    sessions = _sessionize_plays(ordered, session_gap_minutes=session_gap_minutes)
+    session_items = [_to_session_item(session) for session in sessions]
+    total_sessions = len(session_items)
+    avg_plays_per_session = (
+        round(total_plays / total_sessions, 2) if total_sessions > 0 else 0.0
+    )
+    practice_sessions = [
+        item for item in session_items if int(item.get("plays", 0)) >= 3
+    ]
+
     return {
         "total_plays": total_plays,
         "total_fc": total_fc,
@@ -147,6 +162,22 @@ def compute_difficulty_detail(plays: List[Any], *, song_length_seconds: int = 0)
         "plays_before_fc": plays_before_fc,
         "plays_before_ap": plays_before_ap,
         **_estimate_time_fields(total_plays, song_length_seconds),
+        "session_gap_minutes_used": int(session_gap_minutes),
+        "total_sessions": total_sessions,
+        "avg_plays_per_session": avg_plays_per_session,
+        "longest_session_plays": max(
+            [int(item.get("plays", 0)) for item in session_items],
+            default=0,
+        ),
+        "longest_session_minutes": max(
+            [int(item.get("duration_minutes", 0)) for item in session_items],
+            default=0,
+        ),
+        "practice_burst_count": len(practice_sessions),
+        "max_practice_burst_plays": max(
+            [int(item.get("plays", 0)) for item in practice_sessions],
+            default=0,
+        ),
     }
 
 

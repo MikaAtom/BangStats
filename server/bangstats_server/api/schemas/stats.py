@@ -49,6 +49,13 @@ class SongDifficultyDetail(BaseModel):
     plays_before_ap: Optional[int] = None
     estimated_time_played_seconds: int = 0
     estimated_time_played_human: str = "0m"
+    session_gap_minutes_used: int = 45
+    total_sessions: int = 0
+    avg_plays_per_session: float = 0.0
+    longest_session_plays: int = 0
+    longest_session_minutes: int = 0
+    practice_burst_count: int = 0
+    max_practice_burst_plays: int = 0
 
 
 class SongStatsResponse(BaseModel):

@@ -337,8 +337,9 @@ class BangStatsAPI:
         *,
         server: str = "en",
         difficulty: str | None = None,
+        session_gap_minutes: int = 45,
     ) -> dict[str, Any]:
-        params: dict[str, Any] = {"server": server}
+        params: dict[str, Any] = {"server": server, "session_gap_minutes": session_gap_minutes}
         if difficulty:
             params["difficulty"] = difficulty
         response = self._client.get(

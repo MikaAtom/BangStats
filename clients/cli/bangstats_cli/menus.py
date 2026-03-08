@@ -483,7 +483,11 @@ def _print_song_difficulty_overview(overview: list[dict[str, Any]]) -> None:
         difficulty = str(item.get("difficulty", "--"))
         first_played = _format_play_meta(item.get("first_played"))
         total_plays = int(item.get("total_plays", 0) or 0)
-        print(f"  {difficulty:<8} - first played {first_played} (plays: {total_plays})")
+        est_time = item.get("estimated_time_played_human", "0m")
+        print(
+            f"  {difficulty:<8} - first played {first_played} "
+            f"(plays: {total_plays}, time: {est_time})"
+        )
 
 
 def _print_song_difficulty_detail(detail: dict[str, Any]) -> None:
@@ -506,6 +510,20 @@ def _print_song_difficulty_detail(detail: dict[str, Any]) -> None:
     print(
         "  Times played before first AP: "
         + (str(plays_before_ap) if plays_before_ap is not None else "--")
+    )
+    print(f"  Estimated time played: {detail.get('estimated_time_played_human', '0m')}")
+    print(
+        f"  Sessions (gap {detail.get('session_gap_minutes_used', 45)}m): "
+        f"{detail.get('total_sessions', 0)} "
+        f"(avg plays/session: {detail.get('avg_plays_per_session', 0.0)})"
+    )
+    print(
+        f"  Longest session: {detail.get('longest_session_plays', 0)} plays, "
+        f"{detail.get('longest_session_minutes', 0)} min"
+    )
+    print(
+        f"  Practice bursts (>=3 plays/session): {detail.get('practice_burst_count', 0)} "
+        f"(max burst: {detail.get('max_practice_burst_plays', 0)} plays)"
     )
 
 

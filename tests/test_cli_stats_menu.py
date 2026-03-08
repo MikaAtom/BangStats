@@ -119,6 +119,14 @@ class _FakeStatsAPI:
                 "last_ap": {"timestamp": "2026-03-05T12:00:00", "filename": "z.png"},
                 "plays_before_fc": 1,
                 "plays_before_ap": 3,
+                "estimated_time_played_human": "8m",
+                "session_gap_minutes_used": 45,
+                "total_sessions": 2,
+                "avg_plays_per_session": 2.0,
+                "longest_session_plays": 3,
+                "longest_session_minutes": 20,
+                "practice_burst_count": 1,
+                "max_practice_burst_plays": 3,
             },
         }
 
@@ -298,6 +306,8 @@ def test_view_stats_song_search_flow(monkeypatch, capsys):
 
     assert "General Summary" in output
     assert "Detailed stats for Unite! From A To Z [hard]" in output
+    assert "Estimated time played: 8m" in output
+    assert "Practice bursts (>=3 plays/session): 1" in output
     assert any(name == "search_user_stat_songs" for name, _ in api.calls)
     assert any(
         name == "get_user_song_stats" and payload.get("difficulty") == "hard"
