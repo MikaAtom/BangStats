@@ -180,27 +180,32 @@ def compute_milestones(screenshots: List[Any]) -> Dict[str, Any]:
         }
     )
 
-    first_fc = next((play for play in ordered if bool(getattr(play, "full_combo", False))), None)
-    if first_fc:
-        milestones.append(
-            {
-                "type": "first_fc",
-                "label": "First Full Combo",
-                "play_count": ordered.index(first_fc) + 1,
-                "meta": _to_play_meta(first_fc),
-            }
-        )
+    seen_fc_difficulties: set[str] = set()
+    seen_ap_difficulties: set[str] = set()
+    for index, play in enumerate(ordered, start=1):
+        difficulty = str(getattr(play, "difficulty", "")).strip().lower() or "unknown"
 
-    first_ap = next((play for play in ordered if bool(getattr(play, "all_perfect", False))), None)
-    if first_ap:
-        milestones.append(
-            {
-                "type": "first_ap",
-                "label": "First All Perfect",
-                "play_count": ordered.index(first_ap) + 1,
-                "meta": _to_play_meta(first_ap),
-            }
-        )
+        if bool(getattr(play, "full_combo", False)) and difficulty not in seen_fc_difficulties:
+            milestones.append(
+                {
+                    "type": "first_fc",
+                    "label": f"First Full Combo ({difficulty})",
+                    "play_count": index,
+                    "meta": _to_play_meta(play),
+                }
+            )
+            seen_fc_difficulties.add(difficulty)
+
+        if bool(getattr(play, "all_perfect", False)) and difficulty not in seen_ap_difficulties:
+            milestones.append(
+                {
+                    "type": "first_ap",
+                    "label": f"First All Perfect ({difficulty})",
+                    "play_count": index,
+                    "meta": _to_play_meta(play),
+                }
+            )
+            seen_ap_difficulties.add(difficulty)
 
     thresholds = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]
     for threshold in thresholds:

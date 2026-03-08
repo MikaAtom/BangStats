@@ -126,14 +126,16 @@ def test_song_difficulty_overview():
     assert overview["easy"]["first_played"]["filename"] == "easy.png"
 
 
-def test_compute_milestones_includes_firsts_and_thresholds():
+def test_compute_milestones_includes_firsts_by_difficulty_and_thresholds():
     base = datetime(2026, 3, 1, 12, 0, 0)
     plays = [
         _play(song_id=1, difficulty="hard", timestamp=base, full_combo=False, all_perfect=False),
         _play(song_id=1, difficulty="hard", timestamp=base + timedelta(days=1), full_combo=True),
-        _play(song_id=1, difficulty="hard", timestamp=base + timedelta(days=2), all_perfect=True),
+        _play(song_id=1, difficulty="expert", timestamp=base + timedelta(days=2), full_combo=True),
+        _play(song_id=1, difficulty="hard", timestamp=base + timedelta(days=3), all_perfect=True),
+        _play(song_id=1, difficulty="expert", timestamp=base + timedelta(days=4), all_perfect=True),
     ]
-    for idx in range(4, 11):
+    for idx in range(5, 10):
         plays.append(
             _play(
                 song_id=1,
@@ -146,8 +148,10 @@ def test_compute_milestones_includes_firsts_and_thresholds():
     result = compute_milestones(plays)
     labels = [item["label"] for item in result["milestones"]]
     assert "First play recorded" in labels
-    assert "First Full Combo" in labels
-    assert "First All Perfect" in labels
+    assert "First Full Combo (hard)" in labels
+    assert "First Full Combo (expert)" in labels
+    assert "First All Perfect (hard)" in labels
+    assert "First All Perfect (expert)" in labels
     assert "Reached 10 plays" in labels
     assert result["best_streak_days"] >= 1
 
