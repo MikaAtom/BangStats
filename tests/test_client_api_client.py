@@ -77,6 +77,61 @@ class _FakeHttpxClient:
 
     def get(self, url: str, *, params=None):
         self.calls.append({"method": "get", "url": url, "params": params})
+        if "/stats/milestones" in url:
+            return _FakeResponse(
+                {
+                    "milestones": [
+                        {
+                            "type": "first_play",
+                            "label": "First play recorded",
+                            "play_count": 1,
+                            "meta": {"timestamp": "2026-03-01T12:00:00", "filename": "a.png"},
+                        }
+                    ],
+                    "best_streak_days": 3,
+                    "current_streak_days": 2,
+                }
+            )
+        if "/stats/activity" in url:
+            return _FakeResponse(
+                {
+                    "from_date": "2026-03-01",
+                    "to_date": "2026-03-31",
+                    "days": 31,
+                    "summary": {
+                        "total_plays": 42,
+                        "total_fc": 10,
+                        "total_ap": 3,
+                        "accuracy": 95.2,
+                    },
+                    "active_days": 12,
+                    "avg_plays_per_day": 1.35,
+                    "range_streak_days": 4,
+                    "delta_vs_previous": {
+                        "plays_delta": 5,
+                        "plays_delta_pct": 13.51,
+                        "accuracy_delta": 0.8,
+                    },
+                }
+            )
+        if "/stats/calendar" in url:
+            return _FakeResponse(
+                {
+                    "year": 2026,
+                    "month": 3,
+                    "total_days_with_plays": 1,
+                    "days": [
+                        {
+                            "date": "2026-03-01",
+                            "plays": 2,
+                            "fc": 1,
+                            "ap": 0,
+                            "accuracy": 95.0,
+                            "difficulties": {"expert": 2},
+                        }
+                    ],
+                }
+            )
         if "/stats/songs/search" in url:
             return _FakeResponse(
                 {
@@ -247,3 +302,26 @@ def test_song_stats_client_methods():
     )
     assert detail["requested_difficulty"] == "hard"
     assert detail["detail"]["total_plays"] == 2
+
+
+def test_expanded_stats_client_methods():
+    api = BangStatsAPI("http://localhost:8000")
+    fake_client = _FakeHttpxClient([])
+    api._client = fake_client
+
+    milestones = api.get_user_stats_milestones(user_id=7)
+    assert milestones["best_streak_days"] == 3
+
+    activity = api.get_user_stats_activity(user_id=7, preset="30d")
+    assert activity["summary"]["total_plays"] == 42
+
+    custom_activity = api.get_user_stats_activity(
+        user_id=7,
+        preset=None,
+        from_date="2026-03-01",
+        to_date="2026-03-31",
+    )
+    assert custom_activity["days"] == 31
+
+    calendar = api.get_user_stats_calendar(user_id=7, year=2026, month=3)
+    assert calendar["total_days_with_plays"] == 1

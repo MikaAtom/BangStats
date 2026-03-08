@@ -26,6 +26,7 @@ from bangstats_server.core.scripts.prompt_generate import prompt_generate
 from bangstats_server.core.adapters.ocr import get_ocr_service
 from bangstats_server.core.adapters.ocr.gemini import GoogleModelService
 from bangstats_server.core.config import GOOGLE_API_KEY
+from bangstats_server.core.timestamps import extract_timestamp_from_filename
 
 from bangstats_server.core.services.event import EventService
 from bangstats_server.core.services.screenshot import ScreenshotService
@@ -222,26 +223,7 @@ class ScanService:
 
     def _extract_timestamp_from_filename(self, filename: str) -> Optional[int]:
         """Extract timestamp from screenshot filename."""
-        # Legacy format: Screenshot_YYYYMMDD_HHMMSS...
-        compact_match = re.search(r"Screenshot_(\d{8})[-_](\d{6})", filename)
-        if compact_match:
-            date_part = compact_match.group(1)  # YYYYMMDD
-            time_part = compact_match.group(2)  # HHMMSS
-            dt = datetime.datetime.strptime(date_part + time_part, "%Y%m%d%H%M%S")
-            return int(dt.timestamp() * 1000)
-
-        # Newer mobile format: BanG Dream_YYYY-MM-DD-HH-MM-SS...
-        dashed_match = re.search(r"(\d{4})-(\d{2})-(\d{2})[-_](\d{2})-(\d{2})-(\d{2})", filename)
-        if dashed_match:
-            year, month, day, hour, minute, second = dashed_match.groups()
-            dt = datetime.datetime.strptime(
-                f"{year}{month}{day}{hour}{minute}{second}",
-                "%Y%m%d%H%M%S",
-            )
-            return int(dt.timestamp() * 1000)
-
-        logger.warning(f"Could not extract timestamp from filename: {filename}")
-        return None
+        return extract_timestamp_from_filename(filename)
 
     def _generate_prompt_for_timestamp(self, timestamp: Optional[int]) -> str:
         """Generate context-aware prompt based on timestamp."""

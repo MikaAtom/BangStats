@@ -348,6 +348,54 @@ class BangStatsAPI:
         response.raise_for_status()
         return response.json()
 
+    def get_user_stats_milestones(self, user_id: int) -> dict[str, Any]:
+        response = self._client.get(f"/api/users/{user_id}/stats/milestones")
+        response.raise_for_status()
+        return response.json()
+
+    def get_user_stats_activity(
+        self,
+        user_id: int,
+        *,
+        preset: str | None = "30d",
+        from_date: str | None = None,
+        to_date: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if from_date or to_date:
+            if from_date:
+                params["from_date"] = from_date
+            if to_date:
+                params["to_date"] = to_date
+        elif preset:
+            params["preset"] = preset
+
+        response = self._client.get(
+            f"/api/users/{user_id}/stats/activity",
+            params=params,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_user_stats_calendar(
+        self,
+        user_id: int,
+        *,
+        year: int | None = None,
+        month: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if year is not None:
+            params["year"] = year
+        if month is not None:
+            params["month"] = month
+        response = self._client.get(
+            f"/api/users/{user_id}/stats/calendar",
+            params=params,
+        )
+        response.raise_for_status()
+        return response.json()
+
     def flush(
         self,
         *,

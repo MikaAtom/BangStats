@@ -612,6 +612,142 @@ def _song_search_loop(api: BangStatsAPI, user: dict) -> None:
             break
 
 
+def _view_stats_milestones(api: BangStatsAPI, user: dict) -> None:
+    try:
+        payload = api.get_user_stats_milestones(int(user["id"]))
+    except Exception as exc:
+        print(f"Unable to fetch milestones: {exc}")
+        return
+
+    print("\nMilestones")
+    print(f"  Best streak: {payload.get('best_streak_days', 0)} days")
+    print(f"  Current streak: {payload.get('current_streak_days', 0)} days")
+    milestones = payload.get("milestones", [])
+    if not isinstance(milestones, list) or not milestones:
+        print("  No milestones yet.")
+        return
+    for idx, milestone in enumerate(milestones, start=1):
+        meta = milestone.get("meta") if isinstance(milestone, dict) else None
+        print(
+            f"  {idx}. {milestone.get('label', '--')} "
+            f"(play #{milestone.get('play_count', '--')}) "
+            f"- {_format_play_meta(meta if isinstance(meta, dict) else None)}"
+        )
+
+
+def _view_stats_activity(api: BangStatsAPI, user: dict) -> None:
+    print("\nActivity ranges")
+    print("  1. Last 7 days")
+    print("  2. Last 30 days")
+    print("  3. Last 90 days")
+    print("  4. Custom range")
+    choice = input("Select range (or q to go back): ").strip().lower()
+    if choice == "q":
+        return
+
+    try:
+        if choice == "1":
+            payload = api.get_user_stats_activity(int(user["id"]), preset="7d")
+        elif choice == "2":
+            payload = api.get_user_stats_activity(int(user["id"]), preset="30d")
+        elif choice == "3":
+            payload = api.get_user_stats_activity(int(user["id"]), preset="90d")
+        elif choice == "4":
+            from_date = input("From date (YYYY-MM-DD): ").strip()
+            to_date = input("To date (YYYY-MM-DD): ").strip()
+            payload = api.get_user_stats_activity(
+                int(user["id"]),
+                preset=None,
+                from_date=from_date,
+                to_date=to_date,
+            )
+        else:
+            print("Invalid option.")
+            return
+    except Exception as exc:
+        print(f"Unable to fetch activity stats: {exc}")
+        return
+
+    summary = payload.get("summary", {})
+    delta = payload.get("delta_vs_previous", {})
+    print(
+        f"\nActivity {payload.get('from_date', '--')} -> {payload.get('to_date', '--')} "
+        f"({payload.get('days', 0)} days)"
+    )
+    print(f"  Plays: {summary.get('total_plays', 0)}")
+    print(f"  FC: {summary.get('total_fc', 0)}")
+    print(f"  AP: {summary.get('total_ap', 0)}")
+    print(f"  Accuracy: {summary.get('accuracy', 0.0)}%")
+    print(f"  Active days: {payload.get('active_days', 0)}")
+    print(f"  Avg plays/day: {payload.get('avg_plays_per_day', 0.0)}")
+    print(f"  Best streak in range: {payload.get('range_streak_days', 0)} days")
+    print(
+        f"  Delta vs previous window: plays {delta.get('plays_delta', 0)} "
+        f"({delta.get('plays_delta_pct', 0.0)}%), accuracy {delta.get('accuracy_delta', 0.0)}%"
+    )
+
+
+def _view_stats_calendar(api: BangStatsAPI, user: dict) -> None:
+    year_raw = input("Year [current]: ").strip()
+    month_raw = input("Month 1-12 [current]: ").strip()
+
+    kwargs: dict[str, Any] = {}
+    if year_raw:
+        if not year_raw.isdigit():
+            print("Invalid year.")
+            return
+        kwargs["year"] = int(year_raw)
+    if month_raw:
+        if not month_raw.isdigit():
+            print("Invalid month.")
+            return
+        kwargs["month"] = int(month_raw)
+
+    try:
+        payload = api.get_user_stats_calendar(int(user["id"]), **kwargs)
+    except Exception as exc:
+        print(f"Unable to fetch calendar stats: {exc}")
+        return
+
+    print(f"\nCalendar {payload.get('year')}-{int(payload.get('month', 0)):02d}")
+    print(f"  Days with plays: {payload.get('total_days_with_plays', 0)}")
+    days = payload.get("days", [])
+    if not isinstance(days, list) or not days:
+        print("  No plays in this month.")
+        return
+    for day in days:
+        difficulties = day.get("difficulties", {})
+        diffs = ", ".join(f"{k}:{v}" for k, v in sorted(difficulties.items())) if difficulties else "--"
+        print(
+            f"  {day.get('date')} | plays={day.get('plays', 0)} "
+            f"fc={day.get('fc', 0)} ap={day.get('ap', 0)} "
+            f"acc={day.get('accuracy', 0.0)}% | {diffs}"
+        )
+
+
+def _stats_views_loop(api: BangStatsAPI, user: dict) -> None:
+    while True:
+        print("\nStats views")
+        print("  1. Song search and difficulty drill-down")
+        print("  2. Historic milestones")
+        print("  3. Activity ranges")
+        print("  4. Calendar view")
+        print("  q. Back to dashboard")
+        choice = input("Choose stats view: ").strip().lower()
+        if choice == "q":
+            return
+        if choice == "1":
+            _song_search_loop(api, user)
+        elif choice == "2":
+            _view_stats_milestones(api, user)
+        elif choice == "3":
+            _view_stats_activity(api, user)
+        elif choice == "4":
+            _view_stats_calendar(api, user)
+        else:
+            print("Invalid choice.")
+
+
 def view_stats(api: BangStatsAPI, user: dict) -> None:
     try:
         payload = api.get_user_stats(int(user["id"]))
@@ -645,7 +781,7 @@ def view_stats(api: BangStatsAPI, user: dict) -> None:
                 f"  {idx}. {row.get('song_name', 'Unknown')} ({row.get('difficulty', '--')}) - {row.get('timestamp', '--')}"
             )
 
-    _song_search_loop(api, user)
+    _stats_views_loop(api, user)
 
 
 def view_sync_jobs(api: BangStatsAPI) -> None:

@@ -53,3 +53,49 @@ class SongStatsResponse(BaseModel):
     requested_difficulty: Optional[str] = None
     difficulty_overview: List[SongDifficultyOverviewItem] = Field(default_factory=list)
     detail: Optional[SongDifficultyDetail] = None
+
+
+class MilestoneItem(BaseModel):
+    type: str
+    label: str
+    play_count: int
+    meta: Optional[PlayMeta] = None
+
+
+class StatsMilestonesResponse(BaseModel):
+    milestones: List[MilestoneItem] = Field(default_factory=list)
+    best_streak_days: int = 0
+    current_streak_days: int = 0
+
+
+class ActivityDelta(BaseModel):
+    plays_delta: int = 0
+    plays_delta_pct: float = 0.0
+    accuracy_delta: float = 0.0
+
+
+class StatsActivityRangeResponse(BaseModel):
+    from_date: str
+    to_date: str
+    days: int
+    summary: Dict[str, Any]
+    active_days: int
+    avg_plays_per_day: float
+    range_streak_days: int
+    delta_vs_previous: ActivityDelta
+
+
+class CalendarDayStats(BaseModel):
+    date: str
+    plays: int
+    fc: int
+    ap: int
+    accuracy: float
+    difficulties: Dict[str, int] = Field(default_factory=dict)
+
+
+class StatsCalendarResponse(BaseModel):
+    year: int
+    month: int
+    total_days_with_plays: int
+    days: List[CalendarDayStats] = Field(default_factory=list)

@@ -1,5 +1,3 @@
-import re
-import datetime
 import json
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
@@ -10,6 +8,7 @@ from loguru import logger
 from bangstats_server.core.config import EVENT_TYPE_TO_LIVE_TYPES, PACKAGE_ROOT
 from bangstats_server.core.services.song import SongService
 from bangstats_server.core.services.event import EventService
+from bangstats_server.core.timestamps import extract_timestamp_from_filename
 
 
 @dataclass
@@ -71,12 +70,7 @@ class ValidationService:
         return stripped_songs
 
     def _extract_timestamp_from_filename(self, filename: str) -> Optional[int]:
-        match = re.search(r"Screenshot_(\d{8})[-_](\d{6})", filename)
-        if not match:
-            logger.warning(f"Could not extract timestamp from filename: {filename}")
-            return None
-        dt = datetime.datetime.strptime(match.group(1) + match.group(2), "%Y%m%d%H%M%S")
-        return int(dt.timestamp() * 1000)
+        return extract_timestamp_from_filename(filename)
 
     def _allowed_live_types(self, timestamp: int) -> List[str]:
         event = self.event_service.search_events_by_date(timestamp)

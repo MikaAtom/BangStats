@@ -191,6 +191,117 @@ def test_stats_song_detail_route_returns_404_without_plays(monkeypatch):
         assert "no plays found" in response.json()["detail"].lower()
 
 
+def test_stats_milestones_route(monkeypatch):
+    base = datetime(2026, 3, 1, 12, 0, 0)
+    plays = [
+        SimpleNamespace(
+            song_id=10,
+            difficulty="expert",
+            timestamp=base,
+            perfect=100,
+            great=0,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=False,
+            all_perfect=False,
+            filename="a.png",
+        ),
+        SimpleNamespace(
+            song_id=10,
+            difficulty="expert",
+            timestamp=base,
+            perfect=100,
+            great=0,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=True,
+            all_perfect=False,
+            filename="b.png",
+        ),
+    ]
+
+    class _FakeScreenshotService:
+        def get_screenshots_by_user(self, user_id):
+            assert user_id == 7
+            return plays
+
+    monkeypatch.setattr(stats_router, "screenshot_service", _FakeScreenshotService())
+    with TestClient(app) as client:
+        response = client.get("/api/users/7/stats/milestones")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["best_streak_days"] >= 1
+        assert isinstance(payload["milestones"], list)
+
+
+def test_stats_activity_route_preset_and_custom(monkeypatch):
+    base = datetime(2026, 3, 10, 12, 0, 0)
+    plays = [
+        SimpleNamespace(
+            song_id=10,
+            difficulty="expert",
+            timestamp=base,
+            perfect=100,
+            great=0,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=True,
+            all_perfect=False,
+            filename="a.png",
+        )
+    ]
+
+    class _FakeScreenshotService:
+        def get_screenshots_by_user(self, _user_id):
+            return plays
+
+    monkeypatch.setattr(stats_router, "screenshot_service", _FakeScreenshotService())
+    with TestClient(app) as client:
+        preset_response = client.get("/api/users/7/stats/activity", params={"preset": "7d"})
+        assert preset_response.status_code == 200
+        custom_response = client.get(
+            "/api/users/7/stats/activity",
+            params={"from_date": "2026-03-01", "to_date": "2026-03-31"},
+        )
+        assert custom_response.status_code == 200
+        bad_response = client.get("/api/users/7/stats/activity", params={"preset": "2d"})
+        assert bad_response.status_code == 400
+
+
+def test_stats_calendar_route(monkeypatch):
+    base = datetime(2026, 3, 10, 12, 0, 0)
+    plays = [
+        SimpleNamespace(
+            song_id=10,
+            difficulty="expert",
+            timestamp=base,
+            perfect=100,
+            great=0,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=True,
+            all_perfect=False,
+            filename="a.png",
+        )
+    ]
+
+    class _FakeScreenshotService:
+        def get_screenshots_by_user(self, _user_id):
+            return plays
+
+    monkeypatch.setattr(stats_router, "screenshot_service", _FakeScreenshotService())
+    with TestClient(app) as client:
+        response = client.get("/api/users/7/stats/calendar", params={"year": 2026, "month": 3})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["year"] == 2026
+        assert payload["month"] == 3
+
+
 def test_import_json_folder_route(monkeypatch):
     class _FakeScanService:
         def import_json_folder(self, *, folder_path, user_id, persist_to_db):

@@ -2,8 +2,11 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from bangstats_server.core.services.stats import (
+    compute_activity_range,
+    compute_calendar_month_view,
     compute_difficulty_detail,
     compute_general_summary,
+    compute_milestones,
     compute_recent_plays,
     compute_song_difficulty_overview,
     compute_top_songs,
@@ -121,3 +124,60 @@ def test_song_difficulty_overview():
     overview = compute_song_difficulty_overview(plays)
     assert set(overview.keys()) == {"easy", "hard", "expert"}
     assert overview["easy"]["first_played"]["filename"] == "easy.png"
+
+
+def test_compute_milestones_includes_firsts_and_thresholds():
+    base = datetime(2026, 3, 1, 12, 0, 0)
+    plays = [
+        _play(song_id=1, difficulty="hard", timestamp=base, full_combo=False, all_perfect=False),
+        _play(song_id=1, difficulty="hard", timestamp=base + timedelta(days=1), full_combo=True),
+        _play(song_id=1, difficulty="hard", timestamp=base + timedelta(days=2), all_perfect=True),
+    ]
+    for idx in range(4, 11):
+        plays.append(
+            _play(
+                song_id=1,
+                difficulty="hard",
+                timestamp=base + timedelta(days=idx),
+                full_combo=False,
+                all_perfect=False,
+            )
+        )
+    result = compute_milestones(plays)
+    labels = [item["label"] for item in result["milestones"]]
+    assert "First play recorded" in labels
+    assert "First Full Combo" in labels
+    assert "First All Perfect" in labels
+    assert "Reached 10 plays" in labels
+    assert result["best_streak_days"] >= 1
+
+
+def test_compute_activity_range_returns_delta_and_averages():
+    base = datetime(2026, 3, 10, 12, 0, 0)
+    plays = [
+        _play(song_id=1, difficulty="expert", timestamp=base - timedelta(days=8)),
+        _play(song_id=1, difficulty="expert", timestamp=base - timedelta(days=1)),
+        _play(song_id=2, difficulty="hard", timestamp=base),
+    ]
+    result = compute_activity_range(
+        plays,
+        from_date=(base - timedelta(days=2)).date(),
+        to_date=base.date(),
+    )
+    assert result["summary"]["total_plays"] == 2
+    assert result["days"] == 3
+    assert result["avg_plays_per_day"] == round(2 / 3, 2)
+    assert "delta_vs_previous" in result
+
+
+def test_compute_calendar_month_view_aggregates_days():
+    base = datetime(2026, 4, 2, 12, 0, 0)
+    plays = [
+        _play(song_id=1, difficulty="expert", timestamp=base, filename="a.png"),
+        _play(song_id=2, difficulty="hard", timestamp=base, filename="b.png"),
+        _play(song_id=3, difficulty="normal", timestamp=base + timedelta(days=2), filename="c.png"),
+    ]
+    result = compute_calendar_month_view(plays, year=2026, month=4)
+    assert result["total_days_with_plays"] == 2
+    assert result["days"][0]["date"] == "2026-04-02"
+    assert result["days"][0]["plays"] == 2

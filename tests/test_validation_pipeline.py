@@ -572,3 +572,13 @@ def test_generate_prompt_for_missing_timestamp_uses_default_live_types():
     scan_service.working_prompt = "base prompt"
     rendered = ScanService._generate_prompt_for_timestamp(scan_service, None)
     assert isinstance(rendered, str)
+
+
+def test_validation_extract_timestamp_supports_dashed_bang_dream_filename():
+    service = ValidationService.__new__(ValidationService)
+    timestamp_ms = ValidationService._extract_timestamp_from_filename(
+        service,
+        "BanG Dream_2026-02-18-12-05-46.heic",
+    )
+    assert isinstance(timestamp_ms, int)
+    assert timestamp_ms > 0

@@ -1,6 +1,11 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, HTTPException, Query
 
 from bangstats_server.api.schemas.stats import (
+    StatsActivityRangeResponse,
+    StatsCalendarResponse,
+    StatsMilestonesResponse,
     SongDifficultyDetail,
     SongDifficultyOverviewItem,
     SongSearchItem,
@@ -11,8 +16,11 @@ from bangstats_server.api.schemas.stats import (
 from bangstats_server.core.services.screenshot import ScreenshotService
 from bangstats_server.core.services.song import SongService
 from bangstats_server.core.services.stats import (
+    compute_activity_range,
+    compute_calendar_month_view,
     compute_difficulty_detail,
     compute_general_summary,
+    compute_milestones,
     compute_recent_plays,
     compute_song_difficulty_overview,
     compute_top_songs,
@@ -54,6 +62,13 @@ def _difficulty_sort_key(difficulty: str) -> tuple[int, str]:
     order = {"easy": 0, "normal": 1, "hard": 2, "expert": 3, "special": 4}
     lowered = difficulty.lower()
     return order.get(lowered, 99), lowered
+
+
+def _parse_iso_date(value: str, field_name: str):
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}: {value}") from exc
 
 
 @router.get("/users/{user_id}/stats", response_model=StatsResponse)
@@ -172,4 +187,75 @@ def get_user_song_stats(
         requested_difficulty=normalized_difficulty,
         difficulty_overview=overview,
         detail=detail,
+    )
+
+
+@router.get("/users/{user_id}/stats/milestones", response_model=StatsMilestonesResponse)
+def get_user_stats_milestones(user_id: int):
+    screenshots = screenshot_service.get_screenshots_by_user(user_id)
+    if not screenshots:
+        raise HTTPException(status_code=404, detail="No screenshots for this user")
+    return StatsMilestonesResponse(**compute_milestones(screenshots))
+
+
+@router.get("/users/{user_id}/stats/activity", response_model=StatsActivityRangeResponse)
+def get_user_stats_activity(
+    user_id: int,
+    preset: str = Query("30d"),
+    from_date: str | None = Query(None),
+    to_date: str | None = Query(None),
+):
+    screenshots = screenshot_service.get_screenshots_by_user(user_id)
+    if not screenshots:
+        raise HTTPException(status_code=404, detail="No screenshots for this user")
+
+    today = datetime.now(timezone.utc).date()
+    if from_date or to_date:
+        if not from_date or not to_date:
+            raise HTTPException(
+                status_code=400,
+                detail="Both from_date and to_date are required for custom range",
+            )
+        range_start = _parse_iso_date(from_date, "from_date")
+        range_end = _parse_iso_date(to_date, "to_date")
+    else:
+        presets = {"7d": 7, "30d": 30, "90d": 90}
+        days = presets.get(preset)
+        if days is None:
+            raise HTTPException(status_code=400, detail=f"Invalid preset: {preset}")
+        range_end = today
+        range_start = today - timedelta(days=days - 1)
+
+    if range_start > range_end:
+        raise HTTPException(status_code=400, detail="from_date must be <= to_date")
+
+    return StatsActivityRangeResponse(
+        **compute_activity_range(
+            screenshots,
+            from_date=range_start,
+            to_date=range_end,
+        )
+    )
+
+
+@router.get("/users/{user_id}/stats/calendar", response_model=StatsCalendarResponse)
+def get_user_stats_calendar(
+    user_id: int,
+    year: int | None = Query(None, ge=2000, le=2200),
+    month: int | None = Query(None, ge=1, le=12),
+):
+    screenshots = screenshot_service.get_screenshots_by_user(user_id)
+    if not screenshots:
+        raise HTTPException(status_code=404, detail="No screenshots for this user")
+
+    now = datetime.now(timezone.utc)
+    selected_year = year if year is not None else now.year
+    selected_month = month if month is not None else now.month
+
+    return StatsCalendarResponse(
+        **compute_calendar_month_view(
+            screenshots,
+            year=selected_year,
+            month=selected_month,
+        )
     )
