@@ -5,6 +5,7 @@ description = "BangStats self-hosted API server."
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.116.0",
+    "bcrypt>=4.3.0",
     "google-genai==1.31.0",
     "loguru==0.7.3",
     "requests==2.32.5",

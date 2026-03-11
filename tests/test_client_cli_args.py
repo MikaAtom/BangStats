@@ -1,14 +1,3 @@
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-
-ROOT = Path(__file__).resolve().parents[1]
-CLIENT_PATH = ROOT / "clients" / "cli"
-if str(CLIENT_PATH) not in sys.path:
-    sys.path.insert(0, str(CLIENT_PATH))
-
 from bangstats_cli.app import build_parser
 
 

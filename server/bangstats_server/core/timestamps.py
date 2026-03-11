@@ -7,6 +7,10 @@ from loguru import logger
 
 def extract_timestamp_from_filename(filename: str) -> Optional[int]:
     """Extract milliseconds timestamp from known screenshot filename patterns."""
+    unix_ms_match = re.search(r"Screenshot_(\d{13})(?:\D|$)", filename)
+    if unix_ms_match:
+        return int(unix_ms_match.group(1))
+
     compact_match = re.search(r"Screenshot_(\d{8})[-_](\d{6})", filename)
     if compact_match:
         dt = datetime.datetime.strptime(

@@ -2,11 +2,12 @@ from typing import List, Optional, Dict, Any, Union
 from bangstats_server.core.db.repositories.event_repository import EventRepository
 from bangstats_server.core.db.models.event import Event
 from loguru import logger
+from bangstats_server.core.services.base import BaseCRUDService
 
 from datetime import datetime
 
 
-class EventService:
+class EventService(BaseCRUDService):
     """Service layer for event operations with business logic and validation."""
 
     def __init__(self):
@@ -19,7 +20,7 @@ class EventService:
             return None
 
         logger.debug(f"Fetching event by id: {event_id}")
-        return self._repo.get_by_id(event_id)
+        return self._safe_get_by_id(self._repo, event_id)
 
     def get_event_by_event_id(self, event_id: int) -> Optional[Event]:
         if not isinstance(event_id, int) or event_id <= 0:
@@ -33,7 +34,7 @@ class EventService:
 
     def get_all_events(self) -> List[Event]:
         logger.debug("Fetching all events from database")
-        return self._repo.get_all()
+        return self._get_all(self._repo)
 
     def create_event(self, event_data: Dict[str, Any]) -> Event:
         """
@@ -64,9 +65,7 @@ class EventService:
         ):
             raise ValueError("event_start_at/end_at must be dictionaries")
 
-        result, err = self._repo.create(event_data)
-        if err:
-            raise ValueError(err)
+        result = self._create_or_raise(self._repo, event_data)
 
         logger.debug(f"Event created successfully: {result}")
         return result
@@ -102,9 +101,7 @@ class EventService:
         ):
             raise ValueError("event_end_at must be a dictionary")
 
-        result, err = self._repo.update(event_id, event_data)
-        if err:
-            raise ValueError(err)
+        result = self._update_or_raise(self._repo, event_id, event_data)
 
         logger.debug(f"Event {event_id} updated successfully")
         return result
@@ -119,12 +116,10 @@ class EventService:
         if not isinstance(event_id, int) or event_id <= 0:
             raise ValueError("Invalid event ID")
 
-        success, err = self._repo.delete(event_id)
-        if not success:
-            raise ValueError(err)
+        success = self._delete_or_raise(self._repo, event_id)
 
         logger.debug(f"Event {event_id} deleted successfully")
-        return True
+        return success
 
     def search_events_by_name(self, name_query: str, language: str = "en") -> List[Event]:
         if not name_query or not isinstance(name_query, str):
@@ -187,3 +182,10 @@ class EventService:
 
         logger.debug(f"Current event found: {event}")
         return event
+
+    def list_events_since_id(self, since_id: int, limit: int = 5000) -> List[Event]:
+        if not isinstance(since_id, int) or since_id < 0:
+            return []
+        if not isinstance(limit, int) or limit <= 0:
+            limit = 5000
+        return self._repo.list_since_id(since_id, limit=limit)

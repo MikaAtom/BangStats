@@ -2,9 +2,10 @@ from typing import List, Optional, Dict, Any, Tuple
 from bangstats_server.core.db.repositories.song_repository import SongRepository
 from bangstats_server.core.db.models.song import Song
 from loguru import logger
+from bangstats_server.core.services.base import BaseCRUDService
 
 
-class SongService:
+class SongService(BaseCRUDService):
     """Service layer for song operations with business logic and validation."""
 
     def __init__(self):
@@ -17,7 +18,7 @@ class SongService:
             logger.warning(f"Invalid song_id provided: {song_id}")
             return None
         logger.debug(f"Fetching song by id: {song_id}")
-        return self._repo.get_by_id(song_id)
+        return self._safe_get_by_id(self._repo, song_id)
 
     def get_song_by_internal_id(self, internal_song_id: int) -> Optional[Song]:
         """Get a song by its internal ID with validation."""
@@ -30,7 +31,7 @@ class SongService:
     def get_all_songs(self) -> List[Song]:
         """Get all songs from the database."""
         logger.debug("Fetching all songs from database")
-        return self._repo.get_all()
+        return self._get_all(self._repo)
 
     def create_song(self, song_data: Dict[str, Any]) -> Song:
         """
@@ -61,9 +62,7 @@ class SongService:
         if not isinstance(song_data["band_id"], int) or song_data["band_id"] <= 0:
             raise ValueError("band_id must be a positive integer")
 
-        result, err = self._repo.create(song_data)
-        if err:
-            raise ValueError(err)
+        result = self._create_or_raise(self._repo, song_data)
         logger.debug(f"Song created successfully: {result}")
         return result
 
@@ -91,9 +90,7 @@ class SongService:
             if not isinstance(song_data["band_id"], int) or song_data["band_id"] <= 0:
                 raise ValueError("band_id must be a positive integer")
 
-        result, err = self._repo.update(song_id, song_data)
-        if err:
-            raise ValueError(err)
+        result = self._update_or_raise(self._repo, song_id, song_data)
         logger.debug(f"Song {song_id} updated successfully")
         return result
 
@@ -107,11 +104,9 @@ class SongService:
         if not isinstance(song_id, int) or song_id <= 0:
             raise ValueError("Invalid song ID")
 
-        success, err = self._repo.delete(song_id)
-        if not success:
-            raise ValueError(err)
+        success = self._delete_or_raise(self._repo, song_id)
         logger.debug(f"Song {song_id} deleted successfully")
-        return True
+        return success
 
     def search_songs_by_name(self, name_query: str, language: str = "en") -> List[Song]:
         """Search songs by name with validation."""
@@ -224,6 +219,13 @@ class SongService:
             "difficulties": difficulty_counts,
             "tags": tag_counts,
         }
+
+    def list_songs_since_id(self, since_id: int, limit: int = 5000) -> List[Song]:
+        if not isinstance(since_id, int) or since_id < 0:
+            return []
+        if not isinstance(limit, int) or limit <= 0:
+            limit = 5000
+        return self._repo.list_since_id(since_id, limit=limit)
 
     def validate_song_data(
         self, song_data: Dict[str, Any], is_update: bool = False

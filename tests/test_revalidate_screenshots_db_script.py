@@ -1,14 +1,5 @@
-from __future__ import annotations
-
-import sys
 from datetime import datetime
 from pathlib import Path
-
-
-ROOT = Path(__file__).resolve().parents[1]
-SERVER_PATH = ROOT / "server"
-if str(SERVER_PATH) not in sys.path:
-    sys.path.insert(0, str(SERVER_PATH))
 
 from bangstats_server.core.db.models.screenshot import Screenshot
 from bangstats_server.core.scripts.revalidate_screenshots_db import (

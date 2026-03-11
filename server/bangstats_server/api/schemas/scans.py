@@ -1,4 +1,5 @@
-from typing import Any, Dict
+from datetime import datetime
+from typing import Any, Dict, Literal
 
 from pydantic import BaseModel, Field
 
@@ -39,12 +40,70 @@ class FilenameDiffResponse(BaseModel):
 
 
 class CheckLocalPathRequest(BaseModel):
+    user_id: int | None = Field(default=None, ge=1)
     folder_path: str
 
 
 class CheckLocalPathResponse(BaseModel):
     is_local: bool
     canonical_path: str | None = None
+
+
+class UploadResponse(BaseModel):
+    uploaded_files: int
+    total_uploaded_for_user: int
+    total_storage_mb_for_user: float
+
+
+class UploadUsageResponse(BaseModel):
+    file_count: int
+    total_size_mb: float
+    oldest_file_age_days: float
+
+
+class AuthorizeServerFolderRequest(BaseModel):
+    master_key: str
+
+
+class AuthorizeServerFolderResponse(BaseModel):
+    authorized: bool
+
+
+class ScanJobCreateRequest(BaseModel):
+    user_id: int = Field(ge=1)
+    source_type: Literal["upload", "server_folder"]
+    folder_path: str | None = None
+    filenames: list[str] = Field(default_factory=list)
+    parallel_workers: int | None = Field(default=None, ge=1)
+    keys_per_worker: int | None = Field(default=None, ge=1)
+
+
+class ScanJobResponse(BaseModel):
+    id: int
+    user_id: int
+    status: str
+    source_type: str
+    folder_path: str | None = None
+    cancelled: bool = False
+    total_files: int
+    processed: int
+    successful: int
+    validated: int
+    persisted: int
+    failed_to_persist: int
+    skipped_duplicates: int
+    errors: Dict[str, int] = Field(default_factory=dict)
+    error_files: Dict[str, list[str]] = Field(default_factory=dict)
+    parallel_workers: int | None = None
+    keys_per_worker: int | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error_message: str | None = None
+
+
+class ScanJobListResponse(BaseModel):
+    jobs: list[ScanJobResponse] = Field(default_factory=list)
 
 
 class ScanLocalFolderRequest(BaseModel):

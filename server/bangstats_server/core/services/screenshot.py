@@ -1,9 +1,11 @@
-from typing import List, Optional, Dict, Any
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 from bangstats_server.core.db.repositories.screenshot_repo import ScreenshotRepository
 from bangstats_server.core.db.models.screenshot import Screenshot
 from bangstats_server.core.services.song import SongService
 from loguru import logger
 from datetime import datetime
+
+T = TypeVar("T")
 
 
 class ScreenshotService:
@@ -26,6 +28,43 @@ class ScreenshotService:
                 return base_difficulties + ["special"]
 
         return base_difficulties
+
+    def _validate_user_id(self, user_id: int) -> bool:
+        if not isinstance(user_id, int) or user_id <= 0:
+            logger.warning(f"Invalid user_id provided: {user_id}")
+            return False
+        return True
+
+    def _validate_difficulty(self, difficulty: Optional[str]) -> bool:
+        if difficulty is not None and not isinstance(difficulty, str):
+            logger.warning(f"Invalid difficulty provided: {difficulty}")
+            return False
+        return True
+
+    def _collect_across_difficulties(
+        self,
+        user_id: int,
+        difficulty: Optional[str],
+        query_fn: Callable[[int, str], List[T]],
+        action_label: str,
+        song_id: Optional[int] = None,
+    ) -> List[T]:
+        if not self._validate_user_id(user_id) or not self._validate_difficulty(difficulty):
+            return []
+
+        if difficulty:
+            logger.debug(f"Fetching {action_label} for user {user_id} with difficulty {difficulty}")
+            return query_fn(user_id, difficulty)
+
+        difficulties = self._get_available_difficulties(song_id)
+        logger.debug(
+            f"Fetching {action_label} for user {user_id} across difficulties: {difficulties}"
+        )
+        all_results: List[T] = []
+        for diff in difficulties:
+            all_results.extend(query_fn(user_id, diff))
+        logger.debug(f"Found {len(all_results)} {action_label} across available difficulties")
+        return all_results
 
     def get_screenshot_by_id(self, screenshot_id: int) -> Optional[Screenshot]:
         if not isinstance(screenshot_id, int) or screenshot_id <= 0:
@@ -50,35 +89,18 @@ class ScreenshotService:
     def get_screenshots_by_song(
         self, user_id: int, song_id: int, difficulty: Optional[str] = None
     ) -> List[Screenshot]:
-        if not isinstance(user_id, int) or user_id <= 0:
-            logger.warning(f"Invalid user_id provided: {user_id}")
+        if not self._validate_user_id(user_id):
             return []
         if not isinstance(song_id, int) or song_id <= 0:
             logger.warning(f"Invalid song_id provided: {song_id}")
             return []
-
-        if difficulty:
-            if not isinstance(difficulty, str):
-                logger.warning(f"Invalid difficulty provided: {difficulty}")
-                return []
-            logger.debug(
-                f"Fetching screenshots for user {user_id} and song {song_id} with difficulty {difficulty}"
-            )
-            return self._repo.get_by_song_id(user_id, song_id, difficulty)
-
-        # Get available difficulties for this song
-        difficulties = self._get_available_difficulties(song_id)
-        logger.debug(
-            f"Fetching screenshots for user {user_id} and song {song_id} across difficulties: {difficulties}"
+        return self._collect_across_difficulties(
+            user_id=user_id,
+            difficulty=difficulty,
+            query_fn=lambda uid, diff: self._repo.get_by_song_id(uid, song_id, diff),
+            action_label=f"screenshots for song {song_id}",
+            song_id=song_id,
         )
-
-        all_results = []
-        for diff in difficulties:
-            results = self._repo.get_by_song_id(user_id, song_id, diff)
-            all_results.extend(results)
-
-        logger.debug(f"Found {len(all_results)} screenshots across available difficulties")
-        return all_results
 
     def get_existing_filenames_for_user(
         self,
@@ -236,156 +258,56 @@ class ScreenshotService:
         self, user_id: int, difficulty: Optional[str] = None
     ) -> List[Screenshot]:
         """Get all screenshots for a specific user and difficulty."""
-        if not isinstance(user_id, int) or user_id <= 0:
-            logger.warning(f"Invalid user_id provided: {user_id}")
-            return []
-
-        if difficulty:
-            if not isinstance(difficulty, str):
-                logger.warning(f"Invalid difficulty provided: {difficulty}")
-                return []
-            logger.debug(
-                f"Fetching screenshots for user {user_id} and difficulty: {difficulty}"
-            )
-            return self._repo.get_by_difficulty(user_id, difficulty)
-
-        # Get all available difficulties
-        difficulties = self._get_available_difficulties()
-        logger.debug(
-            f"Fetching screenshots for user {user_id} across difficulties: {difficulties}"
+        return self._collect_across_difficulties(
+            user_id=user_id,
+            difficulty=difficulty,
+            query_fn=self._repo.get_by_difficulty,
+            action_label="screenshots",
         )
-
-        all_results = []
-        for diff in difficulties:
-            results = self._repo.get_by_difficulty(user_id, diff)
-            all_results.extend(results)
-
-        logger.debug(f"Found {len(all_results)} screenshots across available difficulties")
-        return all_results
 
     def get_full_combos_by_user(
         self, user_id: int, difficulty: Optional[str] = None
     ) -> List[Screenshot]:
         """Get all full combo screenshots for a user."""
-        if not isinstance(user_id, int) or user_id <= 0:
-            logger.warning(f"Invalid user_id provided: {user_id}")
-            return []
-
-        if difficulty:
-            if not isinstance(difficulty, str):
-                logger.warning(f"Invalid difficulty provided: {difficulty}")
-                return []
-            logger.debug(
-                f"Fetching full combos for user {user_id} with difficulty {difficulty}"
-            )
-            return self._repo.get_full_combos(user_id, difficulty)
-
-        # Get all available difficulties
-        difficulties = self._get_available_difficulties()
-        logger.debug(
-            f"Fetching full combos for user {user_id} across difficulties: {difficulties}"
+        return self._collect_across_difficulties(
+            user_id=user_id,
+            difficulty=difficulty,
+            query_fn=self._repo.get_full_combos,
+            action_label="full combos",
         )
-
-        all_results = []
-        for diff in difficulties:
-            results = self._repo.get_full_combos(user_id, diff)
-            all_results.extend(results)
-
-        logger.debug(f"Found {len(all_results)} full combos across available difficulties")
-        return all_results
 
     def get_all_perfects_by_user(
         self, user_id: int, difficulty: Optional[str] = None
     ) -> List[Screenshot]:
         """Get all all perfect screenshots for a user."""
-        if not isinstance(user_id, int) or user_id <= 0:
-            logger.warning(f"Invalid user_id provided: {user_id}")
-            return []
-
-        if difficulty:
-            if not isinstance(difficulty, str):
-                logger.warning(f"Invalid difficulty provided: {difficulty}")
-                return []
-            logger.debug(
-                f"Fetching all perfects for user {user_id} with difficulty {difficulty}"
-            )
-            return self._repo.get_all_perfects(user_id, difficulty)
-
-        # Get all available difficulties
-        difficulties = self._get_available_difficulties()
-        logger.debug(
-            f"Fetching all perfects for user {user_id} across difficulties: {difficulties}"
+        return self._collect_across_difficulties(
+            user_id=user_id,
+            difficulty=difficulty,
+            query_fn=self._repo.get_all_perfects,
+            action_label="all perfects",
         )
-
-        all_results = []
-        for diff in difficulties:
-            results = self._repo.get_all_perfects(user_id, diff)
-            all_results.extend(results)
-
-        logger.debug(f"Found {len(all_results)} all perfects across available difficulties")
-        return all_results
 
     def get_high_scores_by_user(
         self, user_id: int, difficulty: Optional[str] = None
     ) -> List[Screenshot]:
         """Get all high score screenshots for a user."""
-        if not isinstance(user_id, int) or user_id <= 0:
-            logger.warning(f"Invalid user_id provided: {user_id}")
-            return []
-
-        if difficulty:
-            if not isinstance(difficulty, str):
-                logger.warning(f"Invalid difficulty provided: {difficulty}")
-                return []
-            logger.debug(
-                f"Fetching high scores for user {user_id} with difficulty {difficulty}"
-            )
-            return self._repo.get_high_scores_by_user(user_id, difficulty)
-
-        # Get all available difficulties
-        difficulties = self._get_available_difficulties()
-        logger.debug(
-            f"Fetching high scores for user {user_id} across difficulties: {difficulties}"
+        return self._collect_across_difficulties(
+            user_id=user_id,
+            difficulty=difficulty,
+            query_fn=self._repo.get_high_scores_by_user,
+            action_label="high scores",
         )
-
-        all_results = []
-        for diff in difficulties:
-            results = self._repo.get_high_scores_by_user(user_id, diff)
-            all_results.extend(results)
-
-        logger.debug(f"Found {len(all_results)} high scores across available difficulties")
-        return all_results
 
     def get_anomalies_by_user(
         self, user_id: int, difficulty: Optional[str] = None
     ) -> List[Screenshot]:
         """Get all anomaly screenshots for a user."""
-        if not isinstance(user_id, int) or user_id <= 0:
-            logger.warning(f"Invalid user_id provided: {user_id}")
-            return []
-
-        if difficulty:
-            if not isinstance(difficulty, str):
-                logger.warning(f"Invalid difficulty provided: {difficulty}")
-                return []
-            logger.debug(
-                f"Fetching anomalies for user {user_id} with difficulty {difficulty}"
-            )
-            return self._repo.get_anomalies(user_id, difficulty)
-
-        # Get all available difficulties
-        difficulties = self._get_available_difficulties()
-        logger.debug(
-            f"Fetching anomalies for user {user_id} across difficulties: {difficulties}"
+        return self._collect_across_difficulties(
+            user_id=user_id,
+            difficulty=difficulty,
+            query_fn=self._repo.get_anomalies,
+            action_label="anomalies",
         )
-
-        all_results = []
-        for diff in difficulties:
-            results = self._repo.get_anomalies(user_id, diff)
-            all_results.extend(results)
-
-        logger.debug(f"Found {len(all_results)} anomalies across available difficulties")
-        return all_results
 
     def get_screenshot_by_timestamp(
         self, user_id: int, timestamp: datetime, difficulty: Optional[str] = None

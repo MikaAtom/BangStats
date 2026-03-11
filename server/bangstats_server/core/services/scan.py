@@ -6,7 +6,7 @@ import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from loguru import logger
-from typing import List, Dict, Any, Optional
+from typing import Callable, List, Dict, Any, Optional
 
 from bangstats_server.core.config import (
     EVENT_TYPE_TO_LIVE_TYPES,
@@ -119,6 +119,8 @@ class ScanService:
         filenames: List[str],
         parallel_workers: int | None = None,
         keys_per_worker: int | None = None,
+        on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
+        progress_every: int = 10,
     ) -> Dict[str, Any]:
         locality = self.check_local_scan_path(folder_path)
         if not locality["is_local"] or not locality["canonical_path"]:
@@ -153,6 +155,8 @@ class ScanService:
             persist_to_db=True,
             parallel_workers=parallel_workers,
             keys_per_worker=keys_per_worker,
+            on_progress=on_progress,
+            progress_every=progress_every,
         )
 
     def _setup_cache_structure(self):
@@ -936,6 +940,8 @@ class ScanService:
         persist_to_db: bool = False,
         parallel_workers: Optional[int] = None,
         keys_per_worker: Optional[int] = None,
+        on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
+        progress_every: int = 10,
     ) -> Dict[str, Any]:
         """
         Scan images using AI model and validate results.
@@ -1000,6 +1006,8 @@ class ScanService:
                 for future in futures:
                     worker_result = future.result()
                     self._merge_scan_results(results, worker_result)
+                    if on_progress:
+                        on_progress(results.copy())
 
             error_rate = (
                 (sum(results["errors"].values()) / results["total_scanned"]) * 100
@@ -1014,6 +1022,8 @@ class ScanService:
                 "mode": f"{parallel_workers}x{keys_per_worker}",
                 "parallel_enabled": True,
             }
+            if on_progress:
+                on_progress(results.copy())
             return results
 
         for image_file in image_list:
@@ -1080,6 +1090,9 @@ class ScanService:
 
                 logger.debug(f"Processed {image_file}: {error_type or 'successful'}")
                 print(f"Processed {image_file}: {error_type or 'successful'}")
+                if on_progress and max(1, progress_every) > 0:
+                    if results["total_scanned"] % max(1, progress_every) == 0:
+                        on_progress(results.copy())
 
             except Exception as e:
                 logger.error(f"Error processing {image_file}: {e}")
@@ -1095,6 +1108,8 @@ class ScanService:
             "provider": active_provider,
             "parallel_enabled": False,
         }
+        if on_progress:
+            on_progress(results.copy())
 
         logger.info(
             f"Scan complete: {results['successful']} successful, {sum(results['errors'].values())} errors ({error_rate:.2f}% error rate)"

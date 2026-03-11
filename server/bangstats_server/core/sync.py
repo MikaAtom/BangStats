@@ -3,6 +3,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 
 from bangstats_server.core.adapters.bestdori import RemoteDataService
+from bangstats_server.core.adapters.fake_remote import FakeRemoteDataService
+from bangstats_server.core.config import REMOTE_DATA_PROVIDER
 from bangstats_server.core.scripts.band_data_organize import band_data_organize
 from bangstats_server.core.scripts.event_data_organize import event_data_organize
 from bangstats_server.core.scripts.song_data_organize import song_data_organize
@@ -32,7 +34,12 @@ def update_db(server: str) -> tuple[int, int, int]:
             return value.get(locale) or fallback
         return fallback
 
-    remote_data_service = RemoteDataService(server=server)
+    if REMOTE_DATA_PROVIDER == "fake":
+        remote_data_service = FakeRemoteDataService(server=server)
+    else:
+        remote_data_service = RemoteDataService(server=server)
+
+    use_organized_payloads = getattr(remote_data_service, "returns_organized_payloads", False)
 
     songs_in_database = song_service.get_all_songs()
     print("Fetching songs from Bestdori...")
@@ -79,7 +86,7 @@ def update_db(server: str) -> tuple[int, int, int]:
                 logger.warning(f"Skipping song {song_id}: no data received")
                 continue
 
-            organized_data = song_data_organize(song_data)
+            organized_data = song_data if use_organized_payloads else song_data_organize(song_data)
             created_song = song_service.create_song(organized_data)
             song_name = _localized_name(created_song.name, server)
 
@@ -111,7 +118,9 @@ def update_db(server: str) -> tuple[int, int, int]:
             event_data = events_in_remote.get(str(event_id))
 
             if event_data:
-                organized_event_data = event_data_organize(event_id, event_data)
+                organized_event_data = (
+                    event_data if use_organized_payloads else event_data_organize(event_id, event_data)
+                )
                 created_event = event_service.create_event(organized_event_data)
                 event_name = _localized_name(created_event.event_name, server)
 
@@ -143,7 +152,9 @@ def update_db(server: str) -> tuple[int, int, int]:
             band_data = bands_in_remote.get(str(band_id))
 
             if band_data:
-                organized_band_data = band_data_organize(band_id, band_data)
+                organized_band_data = (
+                    band_data if use_organized_payloads else band_data_organize(band_id, band_data)
+                )
 
                 created_band = band_service.create_band(organized_band_data)
                 band_name = _localized_name(created_band.name, server)

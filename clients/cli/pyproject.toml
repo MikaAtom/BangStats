@@ -9,7 +9,8 @@ dependencies = [
 ]
 
 [project.scripts]
-bangstats = "bangstats_cli.app:run"
+bangstats = "bangstats_cli.dispatcher:run"
+bangstats-client = "bangstats_cli.app:run"
 
 [build-system]
 requires = ["hatchling"]

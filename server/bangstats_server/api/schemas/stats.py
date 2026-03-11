@@ -60,7 +60,6 @@ class SongDifficultyDetail(BaseModel):
 
 class SongStatsResponse(BaseModel):
     song_id: int
-    song_name: str
     requested_difficulty: Optional[str] = None
     difficulty_overview: List[SongDifficultyOverviewItem] = Field(default_factory=list)
     detail: Optional[SongDifficultyDetail] = None

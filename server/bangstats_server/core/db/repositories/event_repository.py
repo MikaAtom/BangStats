@@ -1,29 +1,11 @@
-from typing import List, Optional, Dict, Any, Tuple, Union
+from typing import List, Optional, Union
 from sqlmodel import select
 from bangstats_server.core.db.models.event import Event
-from bangstats_server.core.db import get_session
+from bangstats_server.core.db.repositories.base import BaseRepository
 
 
-class EventRepository:
-    def __init__(self):
-        self._session_gen = get_session()
-        self._session = next(self._session_gen)
-
-    def close(self):
-        self._session_gen.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-
-    def get_by_id(self, event_id: int) -> Optional[Event]:
-        """Retrieve an event by its primary key ID."""
-        if not isinstance(event_id, int) or event_id <= 0:
-            return None
-
-        return self._session.get(Event, event_id)
+class EventRepository(BaseRepository[Event]):
+    model = Event
 
     def get_by_event_id(self, event_id: int) -> Optional[Event]:
         """Retrieve an event by its event_id field."""
@@ -33,12 +15,7 @@ class EventRepository:
         statement = select(Event).where(Event.event_id == event_id)
         return self._session.exec(statement).first()
 
-    def get_all(self) -> List[Event]:
-        """Retrieve all events from the database."""
-        statement = select(Event)
-        return self._session.exec(statement).all()
-
-    def create(self, event_data: Dict[str, Any]) -> Tuple[Optional[Event], Optional[str]]:
+    def create(self, event_data: dict) -> tuple[Optional[Event], Optional[str]]:
         """
         Create a new event record.
         Always returns (event, None) or (None, error_message)
@@ -47,21 +24,14 @@ class EventRepository:
         if existing:
             return None, f"Event with event_id {event_data['event_id']} already exists"
 
-        try:
-            event = Event(**event_data)
-            self._session.add(event)
-            self._session.commit()
-            self._session.refresh(event)
-            return event, None
-        except Exception as e:
-            return None, f"Database error: {e}"
+        return super().create(event_data)
 
-    def update(self, event_id: int, event_data: Dict[str, Any]) -> Tuple[Optional[Event], Optional[str]]:
+    def update(self, event_id: int, event_data: dict) -> tuple[Optional[Event], Optional[str]]:
         """
         Update an existing event record.
         Always returns (event, None) or (None, error_message)
         """
-        event = self._session.get(Event, event_id)
+        event = self.get_by_id(event_id)
         if not event:
             return None, f"Event with ID {event_id} not found"
 
@@ -71,36 +41,16 @@ class EventRepository:
             if existing and existing.id != event_id:
                 return None, f"Event with event_id {event_data['event_id']} already exists"
 
-        try:
-            for key, value in event_data.items():
-                setattr(event, key, value)
+        return super().update(event_id, event_data, f"Event with ID {event_id} not found")
 
-            self._session.add(event)
-            self._session.commit()
-            self._session.refresh(event)
-            return event, None
-        except Exception as e:
-            self._session.rollback()
-            return None, f"Database error: {e}"
-
-    def delete(self, event_id: int) -> Tuple[bool, Optional[str]]:
+    def delete(self, event_id: int) -> tuple[bool, Optional[str]]:
         """
         Delete an event by its ID.
 
         Returns:
             Tuple[bool, Optional[str]]: (success, error_message)
         """
-        event = self._session.get(Event, event_id)
-        if not event:
-            return False, f"Event with ID {event_id} not found"
-
-        try:
-            self._session.delete(event)
-            self._session.commit()
-            return True, None
-        except Exception as e:
-            self._session.rollback()
-            return False, f"Database error: {e}"
+        return super().delete(event_id, f"Event with ID {event_id} not found")
 
     def search_by_name(self, name_query: str, language: str = "en") -> List[Event]:
         """Search for events by name (partial match in specified language)."""
@@ -130,7 +80,7 @@ class EventRepository:
             try:
                 timestamp_int = int(timestamp)
             except ValueError:
-                return []
+                return None
         elif isinstance(timestamp, int):
             timestamp_int = timestamp
         else:
@@ -149,3 +99,14 @@ class EventRepository:
             if start_int is not None and end_int is not None:
                 if start_int <= timestamp_int <= end_int:
                     return event
+
+    def list_since_id(self, since_id: int, limit: int = 5000) -> List[Event]:
+        if not isinstance(since_id, int) or since_id < 0:
+            return []
+        statement = (
+            select(Event)
+            .where(Event.id > since_id)
+            .order_by(Event.id)
+            .limit(limit)
+        )
+        return self._session.exec(statement).all()

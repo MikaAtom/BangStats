@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +10,37 @@ class BangStatsAPI:
     def __init__(self, base_url: str, timeout: float = 60.0):
         self.base_url = base_url.rstrip("/")
         self._client = httpx.Client(base_url=self.base_url, timeout=timeout)
+        self._token: str | None = None
+
+    def set_auth_token(self, token: str | None) -> None:
+        self._token = token
+        if token:
+            self._client.headers["Authorization"] = f"Bearer {token}"
+        else:
+            self._client.headers.pop("Authorization", None)
+
+    def register(self, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self._client.post("/api/auth/register", json=payload)
+        response.raise_for_status()
+        data = response.json()
+        self.set_auth_token(data.get("token"))
+        return data
+
+    def login(self, username: str, password: str) -> dict[str, Any]:
+        response = self._client.post(
+            "/api/auth/login",
+            json={"username": username, "password": password},
+        )
+        response.raise_for_status()
+        data = response.json()
+        self.set_auth_token(data.get("token"))
+        return data
+
+    def logout(self) -> None:
+        if self._token:
+            response = self._client.post("/api/auth/logout")
+            response.raise_for_status()
+        self.set_auth_token(None)
 
     def close(self) -> None:
         self._client.close()
@@ -136,10 +165,114 @@ class BangStatsAPI:
         return response.json()
 
     def check_scan_local_path(self, folder_path: str) -> dict[str, Any]:
+        return self.check_scan_local_path_for_user(folder_path=folder_path, user_id=None)
+
+    def check_scan_local_path_for_user(
+        self,
+        *,
+        folder_path: str,
+        user_id: int | None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"folder_path": folder_path}
+        if user_id is not None:
+            payload["user_id"] = user_id
         response = self._client.post(
             "/api/scans/check-local-path",
-            json={"folder_path": folder_path},
+            json=payload,
         )
+        response.raise_for_status()
+        return response.json()
+
+    def authorize_server_folder(self, *, master_key: str) -> dict[str, Any]:
+        response = self._client.post(
+            "/api/scans/authorize-server-folder",
+            json={"master_key": master_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def upload_scan_files(self, user_id: int, image_paths: list[Path]) -> dict[str, Any]:
+        if not image_paths:
+            return {"uploaded_files": 0, "total_uploaded_for_user": 0, "total_storage_mb_for_user": 0.0}
+
+        batch_size = self.SCAN_UPLOAD_BATCH_SIZE
+        uploaded_total = 0
+        total_uploaded_for_user = 0
+        total_storage_mb_for_user = 0.0
+
+        for start in range(0, len(image_paths), batch_size):
+            batch = image_paths[start : start + batch_size]
+            files = []
+            file_handles = []
+            try:
+                for path in batch:
+                    handle = path.open("rb")
+                    file_handles.append(handle)
+                    files.append(("files", (path.name, handle, "application/octet-stream")))
+                response = self._client.post(
+                    "/api/scans/upload",
+                    data={"user_id": str(user_id)},
+                    files=files,
+                    timeout=None,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                uploaded_total += int(payload.get("uploaded_files", 0) or 0)
+                total_uploaded_for_user = int(payload.get("total_uploaded_for_user", 0) or 0)
+                total_storage_mb_for_user = float(payload.get("total_storage_mb_for_user", 0.0) or 0.0)
+            finally:
+                for handle in file_handles:
+                    handle.close()
+
+        return {
+            "uploaded_files": uploaded_total,
+            "total_uploaded_for_user": total_uploaded_for_user,
+            "total_storage_mb_for_user": total_storage_mb_for_user,
+        }
+
+    def get_upload_usage(self, *, user_id: int) -> dict[str, Any]:
+        response = self._client.get("/api/scans/upload-usage", params={"user_id": user_id})
+        response.raise_for_status()
+        return response.json()
+
+    def create_scan_job(
+        self,
+        *,
+        user_id: int,
+        source_type: str,
+        folder_path: str | None = None,
+        filenames: list[str] | None = None,
+        parallel_workers: int | None = None,
+        keys_per_worker: int | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "user_id": user_id,
+            "source_type": source_type,
+            "folder_path": folder_path,
+            "filenames": filenames or [],
+        }
+        if parallel_workers is not None and keys_per_worker is not None:
+            payload["parallel_workers"] = parallel_workers
+            payload["keys_per_worker"] = keys_per_worker
+        response = self._client.post("/api/scans/jobs", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    def get_scan_job(self, job_id: int) -> dict[str, Any]:
+        response = self._client.get(f"/api/scans/jobs/{job_id}")
+        response.raise_for_status()
+        return response.json()
+
+    def list_scan_jobs(self, limit: int = 20, status: str | None = None) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": limit}
+        if status:
+            params["status"] = status
+        response = self._client.get("/api/scans/jobs", params=params)
+        response.raise_for_status()
+        return response.json()
+
+    def cancel_scan_job(self, job_id: int) -> dict[str, Any]:
+        response = self._client.post(f"/api/scans/jobs/{job_id}/cancel")
         response.raise_for_status()
         return response.json()
 
@@ -436,5 +569,71 @@ class BangStatsAPI:
                 "db": db,
             },
         )
+        response.raise_for_status()
+        return response.json()
+
+    def get_reference_counts(self) -> dict[str, int]:
+        response = self._client.get("/api/reference/counts")
+        response.raise_for_status()
+        return response.json()
+
+    def get_reference_songs(self, since_id: int = 0, limit: int = 5000) -> dict[str, Any]:
+        response = self._client.get(
+            "/api/reference/songs",
+            params={"since_id": since_id, "limit": limit},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_reference_events(self, since_id: int = 0, limit: int = 5000) -> dict[str, Any]:
+        response = self._client.get(
+            "/api/reference/events",
+            params={"since_id": since_id, "limit": limit},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_reference_bands(self, since_id: int = 0, limit: int = 5000) -> dict[str, Any]:
+        response = self._client.get(
+            "/api/reference/bands",
+            params={"since_id": since_id, "limit": limit},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_health(self) -> dict[str, Any]:
+        response = self._client.get("/api/health")
+        response.raise_for_status()
+        return response.json()
+
+    def dev_seed(self, *, user_id: int, count: int = 100) -> dict[str, Any]:
+        response = self._client.post("/api/dev/seed", json={"user_id": user_id, "count": count})
+        response.raise_for_status()
+        return response.json()
+
+    def dev_prepare_simulated_folders(
+        self,
+        *,
+        user_id: int,
+        target: str,
+        count: int = 20,
+        time_span_days: int = 90,
+        clear_existing: bool = True,
+    ) -> dict[str, Any]:
+        response = self._client.post(
+            "/api/dev/prepare-simulated-folders",
+            json={
+                "user_id": user_id,
+                "target": target,
+                "count": count,
+                "time_span_days": time_span_days,
+                "clear_existing": clear_existing,
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def dev_config(self) -> dict[str, Any]:
+        response = self._client.get("/api/dev/config")
         response.raise_for_status()
         return response.json()

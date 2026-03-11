@@ -1,6 +1,8 @@
 # BangStats
 
-CLI tool for scanning BanG Dream! Girls Band Party result screenshots and organizing gameplay data.
+Self-hosted Bang Dream stats stack with:
+- FastAPI server (`bangstats_server`)
+- CLI client (`bangstats_cli`)
 
 Ukrainian README: [README_uk.md](README_uk.md)
 
@@ -13,68 +15,77 @@ Ukrainian README: [README_uk.md](README_uk.md)
 ## Setup
 1. Install `uv`:
    - `brew install uv` (macOS) or see [uv docs](https://docs.astral.sh/uv/)
-2. Sync dependencies:
+2. Sync workspace dependencies:
    - `uv sync --dev`
-3. Configure environment (optional but recommended):
-   - Copy `.env.example` to `.env` and set `GOOGLE_API_KEY` (required for scanning).
-   - Or set `GOOGLE_API_KEY` in your shell.
-4. Run:
-   - `uv run bangstats`
+3. Configure environment:
+   - Copy `.env.example` to `.env`
+   - Set `GOOGLE_API_KEY` (required for scanning features)
 
-Optional (global command):
-- Install as a uv tool once: `uv tool install --editable .`
-- Then run directly: `bangstats`
+## Run
+Start server:
+- `uv run bangstats server`
 
-## Current CLI flow
-1. Login/create user profile
-2. Sync remote reference data
+Start CLI client (in another terminal):
+- `uv run bangstats client`
+
+You can also run the legacy direct client script:
+- `uv run bangstats-client`
+
+### Common command examples
+- Server custom host/port:
+  - `uv run bangstats server --host 127.0.0.1 --port 8000`
+- Server reload mode:
+  - `uv run bangstats server --reload`
+- Client with prefilled login defaults:
+  - `uv run bangstats client --username MikaAtom --game-id 1234567 --server en`
+- Client fast init (skip sync + exit):
+  - `uv run bangstats client --skip-sync --exit-after-init`
+
+## CLI flow
+1. Login or register
+2. Optional DB sync job
 3. Use dashboard actions:
-   - Scan screenshots
-   - View your stats (placeholder)
-   - Update database
-   - Update user settings
+   - scan screenshots
+   - import legacy JSON scans
+   - fix scan errors
+   - view stats
+   - update user settings
+   - view sync job history
 
-## Dev/testing CLI parameters
-- Fast startup:
-  - `uv run bangstats --username MikaAtom --game-id 1234567 --skip-sync --exit-after-init`
-- Pre-fill user creation defaults:
-  - `uv run bangstats --username MikaAtom --game-id 1234567 --server en --screenshots-path "/path/to/screenshots"`
-- Flush specific data targets (no confirmation prompt):
-  - `uv run bangstats --flush-remote-cache`
-  - `uv run bangstats --flush-scan-cache --flush-db`
-- Flush everything:
-  - `uv run bangstats --flush-all`
+## Flush parameters
+Server startup flush flags:
+- `uv run bangstats server --flush-remote-cache`
+- `uv run bangstats server --flush-scan-cache --flush-db`
+- `uv run bangstats server --flush-all`
+
+Client-triggered admin flush flags:
+- `uv run bangstats client --flush-remote-cache`
+- `uv run bangstats client --flush-scan-cache --flush-db`
+- `uv run bangstats client --flush-all`
 
 Flush operations never hard-delete files. They move data into:
-- `bangstats/storage/backups/<ISO-timestamp>/...`
+- `storage/backups/<ISO-timestamp>/...`
 
 ## Project structure
 ```text
-bangstats/
-  cli/                     # CLI entrypoint + interactive menus
-  services/
-    scanning/              # scan + validation pipeline
-    data/                  # entity-focused business services
-  adapters/
-    ocr/                   # OCR integrations and prompt templates
-    bestdori.py            # Bestdori API adapter
-  database/                # db engine, models, repositories
-  config/                  # defaults and config loading
-  utils/                   # shared utility modules
+server/
+  bangstats_server/        # FastAPI app + core logic + DB layer
 
-scripts/                   # project scripts / data transformers
+clients/
+  cli/
+    bangstats_cli/         # CLI client + API client + cache + dispatcher
+
 tests/                     # test suite
 ```
 
 ## Where to add new code
-- new OCR provider -> `bangstats/adapters/ocr/`
-- new OCR prompt -> `bangstats/adapters/ocr/prompts/`
-- new external API adapter -> `bangstats/adapters/`
-- new scan pipeline logic -> `bangstats/services/scanning/`
-- new entity business logic -> `bangstats/services/data/`
-- new CLI behavior -> `bangstats/cli/`
-- new DB model/repository logic -> `bangstats/database/`
+- server API/router changes -> `server/bangstats_server/api/`
+- server business/data logic -> `server/bangstats_server/core/`
+- client UX/menus/arg parsing -> `clients/cli/bangstats_cli/`
+- client HTTP integration -> `clients/cli/bangstats_cli/api_client.py`
+- client local cache behavior -> `clients/cli/bangstats_cli/cache.py`
+- new tests -> `tests/`
 
 ## Notes
 - This is a pet project: structure is intentionally lightweight.
-- Keep dependencies directional: `cli -> services -> (database, adapters)`.
+- Keep boundaries strict: client talks to server via HTTP only.

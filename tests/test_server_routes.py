@@ -1,31 +1,40 @@
-from __future__ import annotations
-
-import sys
 import uuid
 import io
 from datetime import datetime, timezone
-from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
-
-ROOT = Path(__file__).resolve().parents[1]
-SERVER_PATH = ROOT / "server"
-if str(SERVER_PATH) not in sys.path:
-    sys.path.insert(0, str(SERVER_PATH))
-
 from bangstats_server.app import app
+from bangstats_server.api.dependencies import get_current_user
 from bangstats_server.api.routers import scans as scans_router
 from bangstats_server.api.routers import stats as stats_router
 from bangstats_server.api.routers import sync as sync_router
+
+
+@pytest.fixture(autouse=True)
+def _auth_override():
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=7,
+        username="test",
+        game_id="gid",
+        server="en",
+        server_folder_authorized=True,
+    )
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_health_route():
     with TestClient(app) as client:
         response = client.get("/api/health")
         assert response.status_code == 200
-        assert response.json() == {"status": "ok"}
+        payload = response.json()
+        assert payload["status"] == "ok"
+        assert payload["mode"] in {"production", "dev"}
 
 
 def test_user_crud_routes():
@@ -164,7 +173,6 @@ def test_stats_song_detail_route_with_difficulty(monkeypatch):
         assert response.status_code == 200
         payload = response.json()
         assert payload["song_id"] == 125
-        assert payload["song_name"] == "Unite! From A To Z"
         assert payload["requested_difficulty"] == "hard"
         assert len(payload["difficulty_overview"]) == 2
         assert payload["difficulty_overview"][0]["estimated_time_played_seconds"] >= 240
@@ -384,7 +392,7 @@ def test_import_json_folder_route(monkeypatch):
     class _FakeScanService:
         def import_json_folder(self, *, folder_path, user_id, persist_to_db):
             assert folder_path == "/tmp/legacy-json"
-            assert user_id == 1
+            assert user_id == 7
             assert persist_to_db is True
             return {
                 "total_scanned": 2,
@@ -412,7 +420,7 @@ def test_import_json_folder_route(monkeypatch):
         response = client.post(
             "/api/scans/import-json-folder",
             json={
-                "user_id": 1,
+                    "user_id": 7,
                 "folder_path": "/tmp/legacy-json",
                 "persist_to_db": True,
             },
@@ -575,7 +583,7 @@ def test_scan_capabilities_route(monkeypatch):
 def test_scan_filename_diff_route(monkeypatch):
     class _FakeScanService:
         def compute_filename_diff(self, *, user_id, filenames):
-            assert user_id == 3
+            assert user_id == 7
             assert filenames == ["a.png", "b.png", "c.png"]
             return {
                 "requested_total": 3,
@@ -589,7 +597,7 @@ def test_scan_filename_diff_route(monkeypatch):
     with TestClient(app) as client:
         response = client.post(
             "/api/scans/filename-diff",
-            json={"user_id": 3, "filenames": ["a.png", "b.png", "c.png"]},
+            json={"user_id": 7, "filenames": ["a.png", "b.png", "c.png"]},
         )
         assert response.status_code == 200
         payload = response.json()
@@ -624,7 +632,7 @@ def test_scan_local_folder_route(monkeypatch):
             parallel_workers,
             keys_per_worker,
         ):
-            assert user_id == 3
+            assert user_id == 7
             assert folder_path == "/srv/data/BangStats/user/screens"
             assert filenames == ["a.png", "b.png"]
             assert parallel_workers == 2
@@ -647,7 +655,7 @@ def test_scan_local_folder_route(monkeypatch):
         response = client.post(
             "/api/scans/scan-local-folder",
             json={
-                "user_id": 3,
+                "user_id": 7,
                 "folder_path": "/srv/data/BangStats/user/screens",
                 "filenames": ["a.png", "b.png"],
                 "parallel_workers": 2,
@@ -670,7 +678,7 @@ def test_scan_route_accepts_parallel_form_options(monkeypatch):
             parallel_workers,
             keys_per_worker,
         ):
-            assert user_id == 3
+            assert user_id == 7
             assert persist_to_db is True
             assert parallel_workers == 2
             assert keys_per_worker == 2
@@ -704,7 +712,7 @@ def test_scan_route_accepts_parallel_form_options(monkeypatch):
     with TestClient(app) as client:
         response = client.post(
             "/api/scans",
-            data={"user_id": "3", "parallel_workers": "2", "keys_per_worker": "2"},
+            data={"user_id": "7", "parallel_workers": "2", "keys_per_worker": "2"},
             files={"files": ("Screenshot_1.png", io.BytesIO(b"fake"), "image/png")},
         )
         assert response.status_code == 200
@@ -723,7 +731,7 @@ def test_scan_route_rejects_invalid_parallel_mode(monkeypatch):
     with TestClient(app) as client:
         response = client.post(
             "/api/scans",
-            data={"user_id": "3", "parallel_workers": "4", "keys_per_worker": "2"},
+            data={"user_id": "7", "parallel_workers": "4", "keys_per_worker": "2"},
             files={"files": ("Screenshot_1.png", io.BytesIO(b"fake"), "image/png")},
         )
         assert response.status_code == 400

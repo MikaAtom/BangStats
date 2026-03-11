@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from bangstats_server.api.dependencies import assert_user_scope, get_current_user
 from bangstats_server.api.schemas.stats import (
     StatsActivityRangeResponse,
     StatsCalendarResponse,
@@ -16,6 +17,7 @@ from bangstats_server.api.schemas.stats import (
 )
 from bangstats_server.core.services.screenshot import ScreenshotService
 from bangstats_server.core.services.song import SongService
+from bangstats_server.core.db.models.user import User
 from bangstats_server.core.services.stats import (
     compute_activity_range,
     compute_calendar_month_view,
@@ -29,20 +31,26 @@ from bangstats_server.core.services.stats import (
 )
 
 router = APIRouter()
-screenshot_service = ScreenshotService()
-song_service = SongService()
+song_service = SongService
+screenshot_service = ScreenshotService
 
 
-def _resolve_song_name(song_id: int, server: str) -> str:
-    song = song_service.get_song_by_internal_id(song_id)
+def _song_service_instance():
+    if isinstance(song_service, type):
+        return song_service()
+    return song_service
+
+
+def _screenshot_service_instance():
+    if isinstance(screenshot_service, type):
+        return screenshot_service()
+    return screenshot_service
+
+
+def _song_display_name(song, server: str, fallback_id: int | None = None) -> str:
     if not song or not isinstance(song.name, dict):
-        return f"Song {song_id}"
-    return song.name.get(server) or song.name.get("en") or f"Song {song_id}"
-
-
-def _song_display_name(song, server: str) -> str:
-    if not song or not isinstance(song.name, dict):
-        return f"Song {getattr(song, 'internal_song_id', '?')}"
+        fallback_song_id = fallback_id if fallback_id is not None else getattr(song, "internal_song_id", "?")
+        return f"Song {fallback_song_id}"
     return (
         song.name.get(server)
         or song.name.get("en")
@@ -52,6 +60,7 @@ def _song_display_name(song, server: str) -> str:
 
 
 def _search_songs_case_insensitive(query: str) -> list:
+    song_service = _song_service_instance()
     languages = ["en", "jp", "tw", "cn", "kr"]
     merged = {}
     for language in languages:
@@ -73,6 +82,37 @@ def _parse_iso_date(value: str, field_name: str):
         raise HTTPException(status_code=400, detail=f"Invalid {field_name}: {value}") from exc
 
 
+def _get_user_screenshots_or_404(user_id: int):
+    screenshot_service = _screenshot_service_instance()
+    screenshots = screenshot_service.get_screenshots_by_user(user_id)
+    if not screenshots:
+        raise HTTPException(status_code=404, detail="No screenshots for this user")
+    return screenshots
+
+
+def _resolve_date_range(preset: str, from_date: str | None, to_date: str | None):
+    today = datetime.now(timezone.utc).date()
+    if from_date or to_date:
+        if not from_date or not to_date:
+            raise HTTPException(
+                status_code=400,
+                detail="Both from_date and to_date are required for custom range",
+            )
+        range_start = _parse_iso_date(from_date, "from_date")
+        range_end = _parse_iso_date(to_date, "to_date")
+    else:
+        presets = {"7d": 7, "30d": 30, "90d": 90}
+        days = presets.get(preset)
+        if days is None:
+            raise HTTPException(status_code=400, detail=f"Invalid preset: {preset}")
+        range_end = today
+        range_start = today - timedelta(days=days - 1)
+
+    if range_start > range_end:
+        raise HTTPException(status_code=400, detail="from_date must be <= to_date")
+    return range_start, range_end
+
+
 def _song_length_seconds(song: object | None) -> int:
     raw = getattr(song, "length", 0)
     try:
@@ -82,37 +122,18 @@ def _song_length_seconds(song: object | None) -> int:
 
 
 @router.get("/users/{user_id}/stats", response_model=StatsResponse)
-def get_user_stats(user_id: int):
-    screenshots = screenshot_service.get_screenshots_by_user(user_id)
-    if not screenshots:
-        raise HTTPException(status_code=404, detail="No screenshots for this user")
+def get_user_stats(user_id: int, current_user: User = Depends(get_current_user)):
+    user_id = assert_user_scope(user_id, current_user)
+    screenshots = _get_user_screenshots_or_404(user_id)
 
     summary = compute_general_summary(screenshots)
     top_songs = compute_top_songs(screenshots, n=5)
     recent = compute_recent_plays(screenshots, n=5)
 
-    enriched_top = []
-    for row in top_songs:
-        enriched_top.append(
-            {
-                **row,
-                "song_name": _resolve_song_name(row["song_id"], "en"),
-            }
-        )
-
-    enriched_recent = []
-    for row in recent:
-        enriched_recent.append(
-            {
-                **row,
-                "song_name": _resolve_song_name(row["song_id"], "en"),
-            }
-        )
-
     return StatsResponse(
         summary=summary,
-        top_songs=enriched_top,
-        recent=enriched_recent,
+        top_songs=top_songs,
+        recent=recent,
     )
 
 
@@ -122,7 +143,9 @@ def search_user_stat_songs(
     q: str = Query(..., min_length=1),
     limit: int = Query(20, ge=1, le=100),
     server: str = Query("en", min_length=2, max_length=2),
+    current_user: User = Depends(get_current_user),
 ):
+    user_id = assert_user_scope(user_id, current_user)
     # Keep legacy behavior: search globally, then filter by user's plays during detail lookup.
     _ = user_id
     query = q.strip()
@@ -154,15 +177,18 @@ def get_user_song_stats(
     difficulty: str | None = Query(None),
     session_gap_minutes: int = Query(45, ge=5, le=240),
     server: str = Query("en", min_length=2, max_length=2),
+    current_user: User = Depends(get_current_user),
 ):
+    song_service = _song_service_instance()
+    screenshot_service = _screenshot_service_instance()
+    user_id = assert_user_scope(user_id, current_user)
     song = song_service.get_song_by_internal_id(song_id)
     if not song:
         raise HTTPException(status_code=404, detail=f"Song not found: {song_id}")
 
-    song_name = _song_display_name(song, server)
     song_plays = screenshot_service.get_screenshots_by_song(user_id, song_id)
     if not song_plays:
-        raise HTTPException(status_code=404, detail=f"No plays found for {song_name}")
+        raise HTTPException(status_code=404, detail=f"No plays found for song {song_id}")
 
     overview_map = compute_song_difficulty_overview(
         song_plays,
@@ -193,7 +219,7 @@ def get_user_song_stats(
         if not plays:
             raise HTTPException(
                 status_code=404,
-                detail=f"No plays found for {song_name} [{normalized_difficulty}]",
+                detail=f"No plays found for song {song_id} [{normalized_difficulty}]",
             )
         detail = SongDifficultyDetail(
             **compute_difficulty_detail(
@@ -205,7 +231,6 @@ def get_user_song_stats(
 
     return SongStatsResponse(
         song_id=song_id,
-        song_name=song_name,
         requested_difficulty=normalized_difficulty,
         difficulty_overview=overview,
         detail=detail,
@@ -213,10 +238,9 @@ def get_user_song_stats(
 
 
 @router.get("/users/{user_id}/stats/milestones", response_model=StatsMilestonesResponse)
-def get_user_stats_milestones(user_id: int):
-    screenshots = screenshot_service.get_screenshots_by_user(user_id)
-    if not screenshots:
-        raise HTTPException(status_code=404, detail="No screenshots for this user")
+def get_user_stats_milestones(user_id: int, current_user: User = Depends(get_current_user)):
+    user_id = assert_user_scope(user_id, current_user)
+    screenshots = _get_user_screenshots_or_404(user_id)
     return StatsMilestonesResponse(**compute_milestones(screenshots))
 
 
@@ -226,30 +250,11 @@ def get_user_stats_activity(
     preset: str = Query("30d"),
     from_date: str | None = Query(None),
     to_date: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
 ):
-    screenshots = screenshot_service.get_screenshots_by_user(user_id)
-    if not screenshots:
-        raise HTTPException(status_code=404, detail="No screenshots for this user")
-
-    today = datetime.now(timezone.utc).date()
-    if from_date or to_date:
-        if not from_date or not to_date:
-            raise HTTPException(
-                status_code=400,
-                detail="Both from_date and to_date are required for custom range",
-            )
-        range_start = _parse_iso_date(from_date, "from_date")
-        range_end = _parse_iso_date(to_date, "to_date")
-    else:
-        presets = {"7d": 7, "30d": 30, "90d": 90}
-        days = presets.get(preset)
-        if days is None:
-            raise HTTPException(status_code=400, detail=f"Invalid preset: {preset}")
-        range_end = today
-        range_start = today - timedelta(days=days - 1)
-
-    if range_start > range_end:
-        raise HTTPException(status_code=400, detail="from_date must be <= to_date")
+    user_id = assert_user_scope(user_id, current_user)
+    screenshots = _get_user_screenshots_or_404(user_id)
+    range_start, range_end = _resolve_date_range(preset, from_date, to_date)
 
     return StatsActivityRangeResponse(
         **compute_activity_range(
@@ -265,10 +270,10 @@ def get_user_stats_calendar(
     user_id: int,
     year: int | None = Query(None, ge=2000, le=2200),
     month: int | None = Query(None, ge=1, le=12),
+    current_user: User = Depends(get_current_user),
 ):
-    screenshots = screenshot_service.get_screenshots_by_user(user_id)
-    if not screenshots:
-        raise HTTPException(status_code=404, detail="No screenshots for this user")
+    user_id = assert_user_scope(user_id, current_user)
+    screenshots = _get_user_screenshots_or_404(user_id)
 
     now = datetime.now(timezone.utc)
     selected_year = year if year is not None else now.year
@@ -290,30 +295,12 @@ def get_user_stats_insights(
     from_date: str | None = Query(None),
     to_date: str | None = Query(None),
     session_gap_minutes: int = Query(45, ge=5, le=240),
+    current_user: User = Depends(get_current_user),
 ):
-    screenshots = screenshot_service.get_screenshots_by_user(user_id)
-    if not screenshots:
-        raise HTTPException(status_code=404, detail="No screenshots for this user")
-
-    today = datetime.now(timezone.utc).date()
-    if from_date or to_date:
-        if not from_date or not to_date:
-            raise HTTPException(
-                status_code=400,
-                detail="Both from_date and to_date are required for custom range",
-            )
-        range_start = _parse_iso_date(from_date, "from_date")
-        range_end = _parse_iso_date(to_date, "to_date")
-    else:
-        presets = {"7d": 7, "30d": 30, "90d": 90}
-        days = presets.get(preset)
-        if days is None:
-            raise HTTPException(status_code=400, detail=f"Invalid preset: {preset}")
-        range_end = today
-        range_start = today - timedelta(days=days - 1)
-
-    if range_start > range_end:
-        raise HTTPException(status_code=400, detail="from_date must be <= to_date")
+    song_service = _song_service_instance()
+    user_id = assert_user_scope(user_id, current_user)
+    screenshots = _get_user_screenshots_or_404(user_id)
+    range_start, range_end = _resolve_date_range(preset, from_date, to_date)
 
     song_ids = {
         int(getattr(screenshot, "song_id", 0))
@@ -336,18 +323,5 @@ def get_user_stats_insights(
         session_gap_minutes=session_gap_minutes,
         song_lengths_seconds=song_lengths_seconds,
     )
-
-    for item in payload.get("practice_periods", []):
-        song_id = int(item.get("song_id", 0) or 0)
-        item["song_name"] = _song_display_name(song_map.get(song_id), "en") if song_id > 0 else None
-    repetition = payload.get("repetition", {})
-    for key in ("most_looped_songs", "revisited_after_break"):
-        for item in repetition.get(key, []):
-            song_id = int(item.get("song_id", 0) or 0)
-            item["song_name"] = _song_display_name(song_map.get(song_id), "en") if song_id > 0 else None
-    for rec in payload.get("recommendations", []):
-        song_id = int(rec.get("song_id", 0) or 0)
-        if song_id > 0:
-            rec["song_name"] = _song_display_name(song_map.get(song_id), "en")
 
     return StatsInsightsResponse(**payload)

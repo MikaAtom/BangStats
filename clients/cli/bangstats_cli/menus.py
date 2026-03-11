@@ -1,8 +1,10 @@
 from pathlib import Path
 from copy import deepcopy
 from typing import Any
+from getpass import getpass
 
 from bangstats_cli.api_client import BangStatsAPI
+from bangstats_cli.cache import resolve_song_name, search_songs
 
 SUPPORTED_SERVERS = ["en", "jp", "tw", "cn", "kr"]
 EDITABLE_SCAN_FIELDS = [
@@ -24,106 +26,274 @@ EDITABLE_SCAN_FIELDS = [
 ]
 
 
+
 def user_login(
     api: BangStatsAPI,
     username: str | None = None,
     game_id: str | None = None,
     server: str | None = None,
+    register_mode: bool = False,
 ) -> dict:
-    user = None
-    while not user:
-        entered_username = (
-            username if username is not None else input("Enter your username: ").strip()
-        )
+    while True:
+        mode = "register" if register_mode else ""
+        if not mode:
+            print("\nAuth:")
+            print("1. Login")
+            print("2. Register")
+            choice = input("Choose option [1/2]: ").strip()
+            mode = "register" if choice == "2" else "login"
+
+        entered_username = username if username is not None else input("Enter your username: ").strip()
         if not entered_username:
             print("Username cannot be empty. Please try again.")
             continue
+        password = getpass("Enter your password: ").strip()
+        if not password:
+            print("Password cannot be empty. Please try again.")
+            continue
 
-        user = api.get_user_by_username(entered_username)
-        if not user:
-            resolved_game_id = game_id if game_id is not None else ""
-            while not resolved_game_id:
-                resolved_game_id = input("Enter your game ID: ").strip()
-                if not resolved_game_id:
-                    print("Game ID cannot be empty. Please try again.")
-                    continue
+        try:
+            if mode == "register":
+                resolved_game_id = game_id if game_id is not None else ""
+                while not resolved_game_id:
+                    resolved_game_id = input("Enter your game ID: ").strip()
+                    if not resolved_game_id:
+                        print("Game ID cannot be empty. Please try again.")
 
-            resolved_server = server.lower() if isinstance(server, str) else ""
-            while resolved_server not in SUPPORTED_SERVERS:
-                resolved_server = input("Enter your server (en/jp/tw/cn/kr): ").strip().lower()
+                default_server = (server or "en").lower()
+                if default_server not in SUPPORTED_SERVERS:
+                    default_server = "en"
+                entered_server = input(
+                    f"Enter your server (en/jp/tw/cn/kr) [{default_server}]: "
+                ).strip().lower()
+                resolved_server = entered_server or default_server
                 if resolved_server not in SUPPORTED_SERVERS:
                     print("Invalid server. Please enter one of: en, jp, tw, cn, kr.")
                     continue
 
-            user = api.create_user(
-                {
-                    "game_id": resolved_game_id,
-                    "username": entered_username,
-                    "server": resolved_server,
-                }
+                payload = api.register(
+                    {
+                        "username": entered_username,
+                        "password": password,
+                        "game_id": resolved_game_id,
+                        "server": resolved_server,
+                    }
+                )
+                user = payload["user"]
+                print(f"Registered and logged in as {user['username']} ({user['server'].upper()} server)")
+                return user
+
+            payload = api.login(entered_username, password)
+            user = payload["user"]
+            print(f"Logged in as {user['username']} ({user['server'].upper()} server)")
+            return user
+        except Exception as exc:
+            print(f"Auth failed: {exc}")
+            # After a failed forced register attempt, continue with menu flow.
+            register_mode = False
+
+
+def _prompt_local_path(initial_value: str | None = None) -> str | None:
+    current = (initial_value or "").strip()
+    while True:
+        prompt = "Enter local screenshots directory path"
+        if current:
+            prompt += f" [{current}]"
+        prompt += ": "
+        entered = input(prompt).strip()
+        candidate = entered or current
+        if not candidate:
+            print("Screenshots path cannot be empty.")
+            continue
+        path = Path(candidate).expanduser()
+        if not path.exists() or not path.is_dir():
+            print(f"Path is not a directory: {path}")
+            continue
+        return str(path)
+
+
+def _authorize_server_folder_if_needed(api: BangStatsAPI, user: dict) -> dict | None:
+    if bool(user.get("server_folder_authorized", False)):
+        return user
+    print("Server folder access requires master key authorization.")
+    master_key = getpass("Enter master key: ").strip()
+    if not master_key:
+        print("Master key cannot be empty.")
+        return None
+    try:
+        api.authorize_server_folder(master_key=master_key)
+        refreshed = api.get_user(int(user["id"]))
+        print("Server folder access authorized.")
+        return refreshed
+    except Exception as exc:
+        print(f"Authorization failed: {exc}")
+        return None
+
+
+def _prompt_server_folder_path(api: BangStatsAPI, user: dict, initial_value: str | None = None) -> str | None:
+    current = (initial_value or "").strip()
+    while True:
+        prompt = "Enter server screenshots directory path"
+        if current:
+            prompt += f" [{current}]"
+        prompt += ": "
+        entered = input(prompt).strip()
+        candidate = entered or current
+        if not candidate:
+            print("Server folder path cannot be empty.")
+            continue
+        try:
+            locality = api.check_scan_local_path_for_user(
+                folder_path=candidate,
+                user_id=int(user["id"]),
             )
-            print(f"User created: {user['username']} with Game ID: {user['game_id']}")
-        else:
-            print(f"User found: {user['username']} with Game ID: {user['game_id']}")
-    return user
+        except Exception as exc:
+            print(f"Server path validation failed: {exc}")
+            continue
+        if not locality.get("is_local"):
+            print("Path is not accessible on server.")
+            continue
+        return str(locality.get("canonical_path") or candidate)
+
+
+def _safe_update_user(api: BangStatsAPI, user: dict, payload: dict[str, Any]) -> dict:
+    try:
+        return api.update_user(int(user["id"]), payload)
+    except Exception as exc:
+        detail = ""
+        response = getattr(exc, "response", None)
+        if response is not None:
+            try:
+                data = response.json()
+                detail = str(data.get("detail", "")).strip()
+            except Exception:
+                detail = str(getattr(response, "text", "")).strip()
+        message = detail or str(exc)
+        print(f"Unable to update screenshot settings: {message}")
+        return user
+
+
+def _format_api_error(exc: Exception) -> str:
+    response = getattr(exc, "response", None)
+    if response is not None:
+        try:
+            data = response.json()
+            detail = str(data.get("detail", "")).strip()
+            if detail:
+                return detail
+        except Exception:
+            pass
+        text = str(getattr(response, "text", "")).strip()
+        if text:
+            return text
+    return str(exc)
+
+
+def screenshot_location_setup(
+    api: BangStatsAPI,
+    user: dict,
+    *,
+    dev_mode: bool = False,
+    dev_config: dict[str, Any] | None = None,
+) -> dict:
+    _ = dev_mode
+    _ = dev_config
+    source = str(user.get("screenshots_source", "local") or "local").strip().lower()
+    if source == "remote":
+        source = "local"
+    path = str(user.get("screenshots_path", "") or "").strip()
+    has_settings = bool(path)
+
+    if has_settings:
+        print("\nCurrent screenshot settings:")
+        print(f"  source: {source}")
+        print(f"  path: {path}")
+        keep = input("Keep current screenshot location settings? (Y/n): ").strip().lower()
+        if keep not in {"n", "no"}:
+            return user
+        print("Update options:")
+        print("1. Change source type")
+        print("2. Change path only")
+        print("3. Change sync command only")
+        print("0. Cancel")
+        change_choice = input("Choose option: ").strip()
+        if change_choice == "0":
+            return user
+        if change_choice == "3":
+            new_sync = input("Enter sync command (blank to clear): ").strip() or None
+            return _safe_update_user(api, user, {"sync_command": new_sync})
+        if change_choice == "2":
+            if source == "server_folder":
+                refreshed = _authorize_server_folder_if_needed(api, user)
+                if refreshed is None:
+                    return user
+                user = refreshed
+                new_path = _prompt_server_folder_path(api, user, path)
+            else:
+                new_path = _prompt_local_path(path)
+            if not new_path:
+                return user
+            return _safe_update_user(api, user, {"screenshots_path": new_path})
+
+    print("\nWhere are screenshots located?")
+    print("1. On this computer (upload to server)")
+    print("2. On server filesystem (requires authorization)")
+    source_choice = input("Choose source: ").strip()
+    if source_choice not in {"1", "2"}:
+        print("Invalid source choice.")
+        return user
+
+    if source_choice == "1":
+        local_path = _prompt_local_path(path if source == "local" else "")
+        if not local_path:
+            return user
+        return _safe_update_user(
+            api,
+            user,
+            {
+                "screenshots_source": "local",
+                "screenshots_path": local_path,
+            },
+        )
+
+    refreshed = _authorize_server_folder_if_needed(api, user)
+    if refreshed is None:
+        return user
+    user = refreshed
+    server_path = _prompt_server_folder_path(api, user, path if source == "server_folder" else "")
+    if not server_path:
+        return user
+    sync_command_raw = input("Optional sync command (blank to skip): ").strip()
+    payload: dict[str, Any] = {
+        "screenshots_source": "server_folder",
+        "screenshots_path": server_path,
+    }
+    payload["sync_command"] = sync_command_raw or None
+    return _safe_update_user(api, user, payload)
 
 
 def scan_screenshots(
     api: BangStatsAPI,
     user: dict,
     screenshots_path_override: str | None = None,
-) -> None:
+    *,
+    dev_mode: bool = False,
+    dev_config: dict[str, Any] | None = None,
+) -> dict:
+    source = "local"
     screenshots_path = screenshots_path_override or user.get("screenshots_path", "")
+    if screenshots_path_override:
+        source = "local"
+    else:
+        user = screenshot_location_setup(api, user, dev_mode=dev_mode, dev_config=dev_config)
+        source = str(user.get("screenshots_source", "local") or "local").strip().lower()
+        if source == "remote":
+            source = "local"
+        screenshots_path = str(user.get("screenshots_path", "") or "")
+
     if not screenshots_path:
-        screenshots_path = input("Enter the path to your screenshots directory: ").strip()
-        if not screenshots_path:
-            print("Screenshots path cannot be empty. Please try again.")
-            return
-
-    screenshots_dir = Path(screenshots_path).expanduser()
-    while not screenshots_dir.exists():
-        screenshots_path = input("Path does not exist. Enter screenshots directory: ").strip()
-        screenshots_dir = Path(screenshots_path).expanduser()
-
-    allowed_suffixes = {".png", ".jpg", ".jpeg", ".heic", ".heif"}
-    images = sorted(
-        [
-            path
-            for path in screenshots_dir.iterdir()
-            if path.is_file() and path.suffix.lower() in allowed_suffixes
-        ]
-    )
-    if not images:
-        print(f"No images found in {screenshots_dir}.")
-        return
-
-    print(f"Found {len(images)} images in {screenshots_dir}.")
-    image_filenames = [path.name for path in images]
-    try:
-        diff = api.get_scan_filename_diff(
-            user_id=int(user["id"]),
-            filenames=image_filenames,
-        )
-    except Exception as exc:
-        print(f"Filename precheck failed, continuing with full scan: {exc}")
-        diff = {
-            "requested_total": len(image_filenames),
-            "already_scanned_count": 0,
-            "to_scan_count": len(image_filenames),
-            "to_scan_filenames": image_filenames,
-        }
-
-    to_scan_filenames = diff.get("to_scan_filenames", image_filenames)
-    requested_total = int(diff.get("requested_total", len(image_filenames)) or 0)
-    already_scanned = int(diff.get("already_scanned_count", 0) or 0)
-    to_scan_count = int(diff.get("to_scan_count", len(to_scan_filenames)) or 0)
-    print(
-        "Precheck summary: "
-        f"requested={requested_total}, already_scanned={already_scanned}, to_scan={to_scan_count}"
-    )
-    if to_scan_count <= 0:
-        print("All files are already scanned. Nothing to do.")
-        return
+        print("Screenshots path is not configured.")
+        return user
 
     parallel_workers = None
     keys_per_worker = None
@@ -165,51 +335,113 @@ def scan_screenshots(
             except ValueError:
                 print("Invalid parallel mode; falling back to single-worker scan.")
 
-    print("Starting scan...")
-    try:
-        locality = api.check_scan_local_path(str(screenshots_dir))
-    except Exception as exc:
-        print(f"Server path locality check failed, using upload fallback: {exc}")
-        locality = {"is_local": False, "canonical_path": None}
+    print("Starting scan job...")
+    if source == "server_folder":
+        try:
+            locality = api.check_scan_local_path_for_user(
+                folder_path=str(screenshots_path),
+                user_id=int(user["id"]),
+            )
+        except Exception as exc:
+            print(f"Server path validation failed: {exc}")
+            return user
+        if not locality.get("is_local"):
+            print("Configured server path is not accessible.")
+            return user
+        server_path = locality.get("canonical_path") or str(screenshots_path)
+        try:
+            job = api.create_scan_job(
+                user_id=int(user["id"]),
+                source_type="server_folder",
+                folder_path=server_path,
+                filenames=[],
+                parallel_workers=parallel_workers,
+                keys_per_worker=keys_per_worker,
+            )
+        except Exception as exc:
+            print(f"Failed to create scan job: {_format_api_error(exc)}")
+            return user
+        print(
+            f"Scan job #{job.get('id')} started (status={job.get('status')}, total={job.get('total_files', 0)})."
+        )
+        print("Use option 7 to monitor progress/history while continuing to use the app.")
+        return user
 
-    if locality.get("is_local"):
-        server_path = locality.get("canonical_path") or str(screenshots_dir)
-        print(f"Server-local path detected, scanning directly on server: {server_path}")
-        scan_result = api.scan_local_folder(
+    screenshots_dir = Path(str(screenshots_path)).expanduser()
+    if not screenshots_dir.exists() or not screenshots_dir.is_dir():
+        print(f"Path is not a directory: {screenshots_dir}")
+        return user
+
+    allowed_suffixes = {".png", ".jpg", ".jpeg", ".heic", ".heif"}
+    images = sorted(
+        [
+            path
+            for path in screenshots_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in allowed_suffixes
+        ]
+    )
+    if not images:
+        print(f"No images found in {screenshots_dir}.")
+        return user
+
+    print(f"Found {len(images)} images in {screenshots_dir}.")
+    image_filenames = [path.name for path in images]
+    try:
+        diff = api.get_scan_filename_diff(
             user_id=int(user["id"]),
-            folder_path=server_path,
+            filenames=image_filenames,
+        )
+    except Exception as exc:
+        print(f"Filename precheck failed, continuing with full upload: {exc}")
+        diff = {
+            "requested_total": len(image_filenames),
+            "already_scanned_count": 0,
+            "to_scan_count": len(image_filenames),
+            "to_scan_filenames": image_filenames,
+        }
+
+    to_scan_filenames = diff.get("to_scan_filenames", image_filenames)
+    requested_total = int(diff.get("requested_total", len(image_filenames)) or 0)
+    already_scanned = int(diff.get("already_scanned_count", 0) or 0)
+    to_scan_count = int(diff.get("to_scan_count", len(to_scan_filenames)) or 0)
+    print(
+        "Precheck summary: "
+        f"requested={requested_total}, already_scanned={already_scanned}, to_scan={to_scan_count}"
+    )
+    if to_scan_count <= 0:
+        print("All files are already scanned. Nothing to do.")
+        return user
+
+    to_scan_set = set(to_scan_filenames)
+    filtered_images = [path for path in images if path.name in to_scan_set]
+    print(f"Uploading {len(filtered_images)} files to server storage...")
+    try:
+        upload_payload = api.upload_scan_files(int(user["id"]), filtered_images)
+    except Exception as exc:
+        print(f"Upload failed: {exc}")
+        return user
+
+    print(
+        f"Upload completed: {upload_payload.get('uploaded_files', 0)} files "
+        f"(stored={upload_payload.get('total_uploaded_for_user', 0)}, "
+        f"size={upload_payload.get('total_storage_mb_for_user', 0.0)} MB)."
+    )
+    try:
+        job = api.create_scan_job(
+            user_id=int(user["id"]),
+            source_type="upload",
             filenames=to_scan_filenames,
             parallel_workers=parallel_workers,
             keys_per_worker=keys_per_worker,
         )
-    else:
-        to_scan_set = set(to_scan_filenames)
-        filtered_images = [path for path in images if path.name in to_scan_set]
-        print(f"Path is not local to server; uploading {len(filtered_images)} files.")
-        scan_result = api.scan_images(
-            int(user["id"]),
-            filtered_images,
-            parallel_workers=parallel_workers,
-            keys_per_worker=keys_per_worker,
-        )
-    print("Scan completed. Results:")
-    print(f"Total images scanned: {scan_result.get('total_scanned', 0)}")
-    print(f"Successful scans: {scan_result.get('successful', 0)}")
-    print(f"Validated scans: {scan_result.get('validated', 0)}")
-    print(f"Persisted to DB: {scan_result.get('persisted', 0)}")
-    print(f"Failed to persist: {scan_result.get('failed_to_persist', 0)}")
-    print(f"Skipped (duplicate): {scan_result.get('skipped_duplicates', 0)}")
-    print("Errors:")
-    for error_type, count in scan_result.get("errors", {}).items():
-        print(f"  {error_type.replace('_', ' ').title()}: {count}")
-    additional = scan_result.get("additional", {})
-    if additional:
-        print("Scan mode:")
-        print(f"  Provider: {additional.get('provider', '-')}")
-        if additional.get("parallel_enabled"):
-            print(f"  Parallel: {additional.get('mode', '-')}")
-        else:
-            print("  Parallel: disabled")
+    except Exception as exc:
+        print(f"Failed to create scan job: {_format_api_error(exc)}")
+        return user
+    print(
+        f"Scan job #{job.get('id')} started (status={job.get('status')}, total={job.get('total_files', 0)})."
+    )
+    print("Use option 7 to monitor progress/history while continuing to use the app.")
+    return user
 
 
 def import_legacy_json(
@@ -527,7 +759,7 @@ def _print_song_difficulty_detail(detail: dict[str, Any]) -> None:
     )
 
 
-def _song_search_loop(api: BangStatsAPI, user: dict) -> None:
+def _song_search_loop(api: BangStatsAPI, user: dict, song_cache: dict[str, Any] | None = None) -> None:
     user_id = int(user["id"])
     user_server = str(user.get("server", "en") or "en")
     while True:
@@ -538,18 +770,19 @@ def _song_search_loop(api: BangStatsAPI, user: dict) -> None:
             print("Song name cannot be empty.")
             continue
 
-        try:
-            payload = api.search_user_stat_songs(
-                user_id,
-                query,
-                server=user_server,
-                limit=20,
-            )
-        except Exception as exc:
-            print(f"Song search failed: {exc}")
-            continue
-
-        results = payload.get("results", [])
+        results = search_songs(song_cache or {}, query, server=user_server, limit=20)
+        if not results:
+            try:
+                payload = api.search_user_stat_songs(
+                    user_id,
+                    query,
+                    server=user_server,
+                    limit=20,
+                )
+            except Exception as exc:
+                print(f"Song search failed: {exc}")
+                continue
+            results = payload.get("results", [])
         if not isinstance(results, list) or not results:
             print("No matching songs found.")
             continue
@@ -571,7 +804,7 @@ def _song_search_loop(api: BangStatsAPI, user: dict) -> None:
             selected = results[int(picked) - 1]
 
         song_id = int(selected.get("song_id", 0) or 0)
-        song_name = selected.get("song_name", "Unknown")
+        song_name = selected.get("song_name") or f"Song {song_id}"
         if song_id <= 0:
             print("Selected result has invalid song ID.")
             continue
@@ -587,7 +820,9 @@ def _song_search_loop(api: BangStatsAPI, user: dict) -> None:
             continue
 
         overview = song_payload.get("difficulty_overview", [])
-        print(f"\n{song_payload.get('song_name', song_name)}")
+        local_name = resolve_song_name(song_cache or {}, song_id, user_server)
+        song_payload_name = song_payload.get("song_name") or local_name or song_name
+        print(f"\n{song_payload_name}")
         _print_song_difficulty_overview(overview if isinstance(overview, list) else [])
 
         available_difficulties = {
@@ -623,7 +858,7 @@ def _song_search_loop(api: BangStatsAPI, user: dict) -> None:
                 print(f"No detailed stats found for {song_name} [{difficulty}].")
                 break
             print(
-                f"\nDetailed stats for {detail_payload.get('song_name', song_name)} "
+                f"\nDetailed stats for {detail_payload.get('song_name', song_payload_name or song_name)} "
                 f"[{difficulty}]"
             )
             _print_song_difficulty_detail(detail)
@@ -743,7 +978,11 @@ def _view_stats_calendar(api: BangStatsAPI, user: dict) -> None:
         )
 
 
-def _view_stats_insights(api: BangStatsAPI, user: dict) -> None:
+def _view_stats_insights(
+    api: BangStatsAPI,
+    user: dict,
+    song_cache: dict[str, Any] | None = None,
+) -> None:
     print("\nInsights range")
     print("  1. Last 7 days")
     print("  2. Last 30 days")
@@ -837,7 +1076,11 @@ def _view_stats_insights(api: BangStatsAPI, user: dict) -> None:
         print("  No dense practice periods detected.")
     else:
         for row in practice_periods:
-            song_label = row.get("song_name") or f"Song {row.get('song_id')}"
+            song_label = resolve_song_name(
+                song_cache or {},
+                int(row.get("song_id", 0) or 0),
+                str(user.get("server", "en")),
+            )
             print(
                 f"  {song_label} | "
                 f"bursts={row.get('burst_count', 0)} "
@@ -854,7 +1097,11 @@ def _view_stats_insights(api: BangStatsAPI, user: dict) -> None:
         f"({round(float(repetition.get('repeated_ratio', 0.0)) * 100, 1)}%)"
     )
     for row in repetition.get("most_looped_songs", [])[:3]:
-        song_label = row.get("song_name") or f"Song {row.get('song_id')}"
+        song_label = resolve_song_name(
+            song_cache or {},
+            int(row.get("song_id", 0) or 0),
+            str(user.get("server", "en")),
+        )
         print(
             f"  Loop: {song_label} | "
             f"repeat_ratio={round(float(row.get('repeat_ratio', 0.0)) * 100, 1)}% "
@@ -867,14 +1114,18 @@ def _view_stats_insights(api: BangStatsAPI, user: dict) -> None:
         print("\nRecommendations")
         for rec in recommendations:
             target = (
-                f" ({rec.get('song_name')})"
-                if rec.get("song_name")
-                else (f" (Song {rec.get('song_id')})" if rec.get("song_id") else "")
+                f" ({resolve_song_name(song_cache or {}, int(rec.get('song_id', 0) or 0), str(user.get('server', 'en')))})"
+                if rec.get("song_id")
+                else ""
             )
             print(f"  - {rec.get('title', '--')}{target}: {rec.get('detail', '--')}")
 
 
-def _stats_views_loop(api: BangStatsAPI, user: dict) -> None:
+def _stats_views_loop(
+    api: BangStatsAPI,
+    user: dict,
+    song_cache: dict[str, Any] | None = None,
+) -> None:
     while True:
         print("\nStats views")
         print("  1. Song search and difficulty drill-down")
@@ -887,7 +1138,7 @@ def _stats_views_loop(api: BangStatsAPI, user: dict) -> None:
         if choice == "q":
             return
         if choice == "1":
-            _song_search_loop(api, user)
+            _song_search_loop(api, user, song_cache=song_cache)
         elif choice == "2":
             _view_stats_milestones(api, user)
         elif choice == "3":
@@ -895,12 +1146,16 @@ def _stats_views_loop(api: BangStatsAPI, user: dict) -> None:
         elif choice == "4":
             _view_stats_calendar(api, user)
         elif choice == "5":
-            _view_stats_insights(api, user)
+            _view_stats_insights(api, user, song_cache=song_cache)
         else:
             print("Invalid choice.")
 
 
-def view_stats(api: BangStatsAPI, user: dict) -> None:
+def view_stats(
+    api: BangStatsAPI,
+    user: dict,
+    reference_cache: dict[str, Any] | None = None,
+) -> None:
     try:
         payload = api.get_user_stats(int(user["id"]))
     except Exception as exc:
@@ -917,28 +1172,32 @@ def view_stats(api: BangStatsAPI, user: dict) -> None:
     print(f"  Total AP: {summary.get('total_ap', 0)}")
     print(f"  Accuracy: {summary.get('accuracy', 0.0)}%")
 
+    song_cache = (reference_cache or {}).get("songs", {})
+
     print("\nTop 5 songs by play count")
     if not top_songs:
         print("  No data yet.")
     else:
         for idx, row in enumerate(top_songs, start=1):
-            print(f"  {idx}. {row.get('song_name', 'Unknown')} - {row.get('play_count', 0)} plays")
+            song_label = resolve_song_name(song_cache, int(row.get("song_id", 0) or 0), str(user.get("server", "en")))
+            print(f"  {idx}. {song_label} - {row.get('play_count', 0)} plays")
 
     print("\nLast 5 songs")
     if not recent:
         print("  No data yet.")
     else:
         for idx, row in enumerate(recent, start=1):
+            song_label = resolve_song_name(song_cache, int(row.get("song_id", 0) or 0), str(user.get("server", "en")))
             print(
-                f"  {idx}. {row.get('song_name', 'Unknown')} ({row.get('difficulty', '--')}) - {row.get('timestamp', '--')}"
+                f"  {idx}. {song_label} ({row.get('difficulty', '--')}) - {row.get('timestamp', '--')}"
             )
 
-    _stats_views_loop(api, user)
+    _stats_views_loop(api, user, song_cache=song_cache)
 
 
-def view_sync_jobs(api: BangStatsAPI) -> None:
+def view_jobs(api: BangStatsAPI) -> None:
     status_filter_raw = input(
-        "Filter by status (queued/running/succeeded/failed, blank for all): "
+        "Filter by status (queued/running/succeeded/failed/cancelled, blank for all): "
     ).strip()
     status_filter = status_filter_raw or None
     limit_raw = input("How many recent jobs to show? [10]: ").strip()
@@ -950,37 +1209,94 @@ def view_sync_jobs(api: BangStatsAPI) -> None:
         print("Invalid limit, using 10.")
         limit = 10
 
+    scan_jobs = []
+    sync_jobs = []
     try:
-        payload = api.list_sync_jobs(limit=limit, status=status_filter)
+        scan_jobs = (api.list_scan_jobs(limit=limit, status=status_filter) or {}).get("jobs", [])
+    except Exception as exc:
+        print(f"Unable to fetch scan jobs: {exc}")
+    try:
+        sync_jobs = (api.list_sync_jobs(limit=limit, status=status_filter) or {}).get("jobs", [])
     except Exception as exc:
         print(f"Unable to fetch sync jobs: {exc}")
+
+    if not scan_jobs and not sync_jobs:
+        print("No jobs found.")
         return
 
-    jobs = payload.get("jobs", [])
-    if not jobs:
-        print("No sync jobs found.")
-        return
+    if scan_jobs:
+        print("\nRecent scan jobs:")
+        for job in scan_jobs:
+            total = int(job.get("total_files", 0) or 0)
+            processed = int(job.get("processed", 0) or 0)
+            pct = round((processed / total) * 100, 1) if total > 0 else 0.0
+            print(
+                f"  s{job.get('id')} | {job.get('status')} | "
+                f"progress={processed}/{total} ({pct}%) | created={job.get('created_at')}"
+            )
 
-    print("\nRecent sync jobs:")
-    for job in jobs:
-        print(
-            f"  #{job.get('id')} | {job.get('status')} | server={job.get('server')} "
-            f"| created={job.get('created_at')}"
-        )
+    if sync_jobs:
+        print("\nRecent sync jobs:")
+        for job in sync_jobs:
+            print(
+                f"  y{job.get('id')} | {job.get('status')} | server={job.get('server')} "
+                f"| created={job.get('created_at')}"
+            )
 
-    detail_raw = input("Enter job ID to view details (blank to go back): ").strip()
+    detail_raw = input("Enter job ID (s<ID> for scan, y<ID> for sync, blank to go back): ").strip().lower()
     if not detail_raw:
         return
-    if not detail_raw.isdigit():
-        print("Invalid job ID.")
+    job_type = ""
+    job_id_raw = detail_raw
+    if detail_raw.startswith("s"):
+        job_type = "scan"
+        job_id_raw = detail_raw[1:]
+    elif detail_raw.startswith("y"):
+        job_type = "sync"
+        job_id_raw = detail_raw[1:]
+    if not job_id_raw.isdigit():
+        print("Invalid job ID format.")
+        return
+    job_id = int(job_id_raw)
+
+    if job_type == "scan":
+        try:
+            detail = api.get_scan_job(job_id)
+        except Exception as exc:
+            print(f"Unable to fetch scan job detail: {exc}")
+            return
+        print("\nScan job detail:")
+        print(f"  ID: {detail.get('id')}")
+        print(f"  Status: {detail.get('status')}")
+        print(f"  Source type: {detail.get('source_type')}")
+        print(f"  Folder path: {detail.get('folder_path')}")
+        print(f"  Created at: {detail.get('created_at')}")
+        print(f"  Started at: {detail.get('started_at')}")
+        print(f"  Finished at: {detail.get('finished_at')}")
+        print(f"  Total files: {detail.get('total_files')}")
+        print(f"  Processed: {detail.get('processed')}")
+        print(f"  Successful: {detail.get('successful')}")
+        print(f"  Validated: {detail.get('validated')}")
+        print(f"  Persisted: {detail.get('persisted')}")
+        print(f"  Failed to persist: {detail.get('failed_to_persist')}")
+        print(f"  Skipped duplicates: {detail.get('skipped_duplicates')}")
+        if detail.get("error_message"):
+            print(f"  Error: {detail.get('error_message')}")
+        if detail.get("status") in {"queued", "running"}:
+            cancel = input("Cancel this job? (y/N): ").strip().lower()
+            if cancel in {"y", "yes"}:
+                try:
+                    updated = api.cancel_scan_job(job_id)
+                    print(f"Job status is now: {updated.get('status')}")
+                except Exception as exc:
+                    print(f"Cancel failed: {exc}")
         return
 
     try:
-        detail = api.get_sync_job(int(detail_raw))
+        detail = api.get_sync_job(job_id)
     except Exception as exc:
         print(f"Unable to fetch sync job detail: {exc}")
         return
-
     print("\nSync job detail:")
     print(f"  ID: {detail.get('id')}")
     print(f"  Status: {detail.get('status')}")
@@ -1004,13 +1320,16 @@ def update_user_settings(api: BangStatsAPI, user: dict) -> dict:
         print(f"Server: {user['server']}")
         print(f"Screenshots Source: {user.get('screenshots_source', 'local')}")
         print(f"Screenshots Path: {user.get('screenshots_path', '')}")
+        print(f"Server folder authorized: {bool(user.get('server_folder_authorized', False))}")
+        print(f"Sync command: {user.get('sync_command') or '-'}")
 
         print("\nOptions to update:")
         print("1. Game ID")
         print("2. Server")
-        print("3. Screenshots Source")
-        print("4. Screenshots Path")
-        print("5. Back to main menu")
+        print("3. Screenshot location setup")
+        print("4. Sync command")
+        print("5. Show upload storage usage")
+        print("6. Back to main menu")
 
         choice = input("Enter your choice: ").strip()
         if choice == "1":
@@ -1026,18 +1345,25 @@ def update_user_settings(api: BangStatsAPI, user: dict) -> dict:
             else:
                 print("Invalid server. Please try again.")
         elif choice == "3":
-            new_source = input("Enter new Screenshots Source (local/remote): ").strip().lower()
-            if new_source in ["local", "remote"]:
-                user = api.update_user(int(user["id"]), {"screenshots_source": new_source})
-                print(f"Screenshots Source updated to {user['screenshots_source']}")
-            else:
-                print("Invalid screenshots source. Please try again.")
+            user = screenshot_location_setup(api, user)
         elif choice == "4":
-            new_path = input("Enter new Screenshots Path: ").strip()
-            if new_path:
-                user = api.update_user(int(user["id"]), {"screenshots_path": new_path})
-                print(f"Screenshots Path updated to {user['screenshots_path']}")
+            source = str(user.get("screenshots_source", "local")).lower()
+            if source != "server_folder":
+                print("Sync command is available only for server_folder source.")
+                continue
+            new_command = input("Enter sync command (blank to clear): ").strip() or None
+            user = api.update_user(int(user["id"]), {"sync_command": new_command})
+            print("Sync command updated.")
         elif choice == "5":
+            try:
+                usage = api.get_upload_usage(user_id=int(user["id"]))
+                print("Upload storage usage:")
+                print(f"  File count: {usage.get('file_count', 0)}")
+                print(f"  Total size: {usage.get('total_size_mb', 0.0)} MB")
+                print(f"  Oldest file age: {usage.get('oldest_file_age_days', 0.0)} days")
+            except Exception as exc:
+                print(f"Unable to fetch upload usage: {exc}")
+        elif choice == "6":
             leaving = True
         else:
             print("Invalid choice. Please try again.")

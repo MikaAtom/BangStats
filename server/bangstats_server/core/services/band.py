@@ -2,9 +2,10 @@ from typing import List, Optional, Dict, Any
 from bangstats_server.core.db.repositories.band_repository import BandRepository
 from bangstats_server.core.db.models.band import Band
 from loguru import logger
+from bangstats_server.core.services.base import BaseCRUDService
 
 
-class BandService:
+class BandService(BaseCRUDService):
     def __init__(self):
         self._repo = BandRepository()
         logger.debug("BandService initialized with BandRepository")
@@ -14,7 +15,7 @@ class BandService:
             logger.warning(f"Invalid band_id provided: {band_id}")
             return None
         logger.debug(f"Fetching band by id: {band_id}")
-        return self._repo.get_by_id(band_id)
+        return self._safe_get_by_id(self._repo, band_id)
 
     def get_band_by_internal_id(self, internal_band_id: int) -> Optional[Band]:
         if not isinstance(internal_band_id, int) or internal_band_id <= 0:
@@ -25,7 +26,7 @@ class BandService:
 
     def get_all_bands(self) -> List[Band]:
         logger.debug("Fetching all bands from database")
-        return self._repo.get_all()
+        return self._get_all(self._repo)
 
     def create_band(self, band_data: Dict[str, Any]) -> Band:
         logger.debug(f"Attempting to create band with data: {band_data}")
@@ -44,9 +45,7 @@ class BandService:
             raise ValueError("internal_band_id must be a positive integer")
         if not isinstance(band_data["name"], dict):
             raise ValueError("name must be a dict with language keys")
-        band, err = self._repo.create(band_data)
-        if err:
-            raise ValueError(err)
+        band = self._create_or_raise(self._repo, band_data)
         logger.debug(f"Band created successfully: {band}")
         return band
 
@@ -62,9 +61,7 @@ class BandService:
                 raise ValueError("internal_band_id must be a positive integer")
         if "name" in band_data and not isinstance(band_data["name"], dict):
             raise ValueError("name must be a dict with language keys")
-        band, err = self._repo.update(band_id, band_data)
-        if err:
-            raise ValueError(err)
+        band = self._update_or_raise(self._repo, band_id, band_data)
         logger.debug(f"Band {band_id} updated successfully")
         return band
 
@@ -72,11 +69,9 @@ class BandService:
         logger.debug(f"Attempting to delete band {band_id}")
         if not isinstance(band_id, int) or band_id <= 0:
             raise ValueError("Invalid band ID")
-        success, err = self._repo.delete(band_id)
-        if not success:
-            raise ValueError(err)
+        success = self._delete_or_raise(self._repo, band_id)
         logger.debug(f"Band {band_id} deleted successfully")
-        return True
+        return success
 
     def search_bands_by_name(self, name_query: str, language: str = "en") -> List[Band]:
         if not name_query or not isinstance(name_query, str):
@@ -89,3 +84,10 @@ class BandService:
             f"Searching bands by name '{name_query.strip()}' in language '{language}'"
         )
         return self._repo.search_by_name(name_query.strip(), language)
+
+    def list_bands_since_id(self, since_id: int, limit: int = 5000) -> List[Band]:
+        if not isinstance(since_id, int) or since_id < 0:
+            return []
+        if not isinstance(limit, int) or limit <= 0:
+            limit = 5000
+        return self._repo.list_since_id(since_id, limit=limit)

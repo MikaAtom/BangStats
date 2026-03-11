@@ -1,6 +1,7 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from loguru import logger
 
+from bangstats_server.api.dependencies import get_current_user
 from bangstats_server.api.schemas.sync import (
     CountsResponse,
     SyncJobListResponse,
@@ -8,6 +9,7 @@ from bangstats_server.api.schemas.sync import (
     SyncRequest,
 )
 from bangstats_server.core.db.models.sync_job import SyncJob
+from bangstats_server.core.db.models.user import User
 from bangstats_server.core.services.sync_job import SyncJobService
 from bangstats_server.core.sync import get_db_counts, update_db
 
@@ -42,12 +44,19 @@ def _run_sync_job(job_id: int, server: str) -> None:
 
 
 @router.post("/sync/jobs", response_model=SyncJobResponse)
-def create_sync_job(data: SyncRequest, background_tasks: BackgroundTasks):
+def create_sync_job(
+    data: SyncRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
     service = SyncJobService()
+    requested_by_user_id = int(current_user.id)
+    if data.requested_by_user_id is not None and int(data.requested_by_user_id) != requested_by_user_id:
+        raise HTTPException(status_code=403, detail="Forbidden for this user")
     try:
         job = service.create_job(
             server=data.server,
-            requested_by_user_id=data.requested_by_user_id,
+            requested_by_user_id=requested_by_user_id,
         )
     except ValueError as exc:
         detail = str(exc)
@@ -81,11 +90,15 @@ def list_sync_jobs(
 
 
 @router.post("/sync", response_model=SyncJobResponse)
-def sync_data(data: SyncRequest, background_tasks: BackgroundTasks):
+def sync_data(
+    data: SyncRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
     """
     Backward-compatible alias for starting async sync jobs.
     """
-    return create_sync_job(data, background_tasks)
+    return create_sync_job(data, background_tasks, current_user=current_user)
 
 
 @router.get("/db/counts", response_model=CountsResponse)
