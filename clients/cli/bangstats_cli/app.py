@@ -373,6 +373,10 @@ def run(argv: list[str] | None = None):
                 else:
                     print(f"Unable to start sync job: {detail or exc}")
             counts = api.get_db_counts()
+        try:
+            health = api.get_health()
+        except Exception:
+            health = {"db_path": "unknown", "mode": "unknown"}
         current_event = api.get_current_event(game_server)
 
         mode_label = ""
@@ -431,12 +435,16 @@ def run(argv: list[str] | None = None):
             if active_line:
                 print(active_line)
             print(f"Server: {game_server}")
+            print(f"DB: {health.get('db_path', 'unknown')}")
             print(f"Songs in database: {counts.get('songs', 0)}")
             if current_event:
                 event_name = current_event.get("event_name", {}).get(game_server, "Unknown Event")
                 print(f"Current Event: {event_name} (ID: {current_event.get('event_id')})")
             else:
-                print("Off event time")
+                print(
+                    "No event found for this server at current UTC time "
+                    f"(server={game_server}, db={health.get('db_path', 'unknown')})"
+                )
 
             print("\nOptions:")
             print("1. Scan screenshots")

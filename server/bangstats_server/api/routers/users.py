@@ -11,6 +11,10 @@ router = APIRouter()
 
 def _to_user_response(user) -> UserResponse:
     payload = jsonable_encoder(user)
+    if payload.get("role") is None:
+        payload["role"] = "user"
+    if payload.get("excluded_song_ids") is None:
+        payload["excluded_song_ids"] = []
     return UserResponse(**payload)
 
 

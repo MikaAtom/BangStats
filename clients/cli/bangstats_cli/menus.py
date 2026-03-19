@@ -34,26 +34,42 @@ def user_login(
     server: str | None = None,
     register_mode: bool = False,
 ) -> dict:
+    def _prompt_game_id(current: str | None = None) -> str:
+        resolved = current or ""
+        while not resolved:
+            resolved = input("Enter your game ID: ").strip()
+            if not resolved:
+                print("Game ID cannot be empty. Please try again.")
+        return resolved
+
     while True:
         mode = "register" if register_mode else ""
         if not mode:
             print("\nAuth:")
             print("1. Login")
             print("2. Register")
-            choice = input("Choose option [1/2]: ").strip()
-            mode = "register" if choice == "2" else "login"
+            print("3. Legacy login")
+            print("4. Legacy set password")
+            choice = input("Choose option [1/2/3/4]: ").strip()
+            if choice == "2":
+                mode = "register"
+            elif choice == "3":
+                mode = "legacy_login"
+            elif choice == "4":
+                mode = "legacy_setup"
+            else:
+                mode = "login"
 
         entered_username = username if username is not None else input("Enter your username: ").strip()
         if not entered_username:
             print("Username cannot be empty. Please try again.")
             continue
-        password = getpass("Enter your password: ").strip()
-        if not password:
-            print("Password cannot be empty. Please try again.")
-            continue
-
         try:
             if mode == "register":
+                password = getpass("Enter your password: ").strip()
+                if not password:
+                    print("Password cannot be empty. Please try again.")
+                    continue
                 resolved_game_id = game_id if game_id is not None else ""
                 while not resolved_game_id:
                     resolved_game_id = input("Enter your game ID: ").strip()
@@ -83,12 +99,64 @@ def user_login(
                 print(f"Registered and logged in as {user['username']} ({user['server'].upper()} server)")
                 return user
 
+            if mode == "legacy_login":
+                payload = api.legacy_login(entered_username, _prompt_game_id(game_id))
+                user = payload["user"]
+                print(f"Logged in via legacy flow as {user['username']} ({user['server'].upper()} server)")
+                return user
+
+            if mode == "legacy_setup":
+                resolved_game_id = _prompt_game_id(game_id)
+                new_password = getpass("Set new password: ").strip()
+                if not new_password:
+                    print("Password cannot be empty. Please try again.")
+                    continue
+                payload = api.legacy_password_setup(entered_username, resolved_game_id, new_password)
+                user = payload["user"]
+                print(f"Password set and logged in as {user['username']} ({user['server'].upper()} server)")
+                return user
+
+            password = getpass("Enter your password: ").strip()
+            if not password:
+                print("Password cannot be empty. Choose option 3 or 4 for legacy accounts.")
+                continue
             payload = api.login(entered_username, password)
             user = payload["user"]
             print(f"Logged in as {user['username']} ({user['server'].upper()} server)")
             return user
         except Exception as exc:
-            print(f"Auth failed: {exc}")
+            detail = _format_api_error(exc)
+            if "password setup" in detail.lower():
+                print("This account is using the legacy passwordless flow.")
+                print("1. Temporary legacy login")
+                print("2. Set password now")
+                print("3. Retry normal login")
+                legacy_choice = input("Choose option [1/2/3]: ").strip() or "1"
+                if legacy_choice == "1":
+                    try:
+                        payload = api.legacy_login(entered_username, _prompt_game_id(game_id))
+                        user = payload["user"]
+                        print(f"Logged in via legacy flow as {user['username']} ({user['server'].upper()} server)")
+                        return user
+                    except Exception as legacy_exc:
+                        print(f"Legacy login failed: {_format_api_error(legacy_exc)}")
+                        continue
+                if legacy_choice == "2":
+                    resolved_game_id = _prompt_game_id(game_id)
+                    new_password = getpass("Set new password: ").strip()
+                    if not new_password:
+                        print("Password cannot be empty. Please try again.")
+                        continue
+                    try:
+                        payload = api.legacy_password_setup(entered_username, resolved_game_id, new_password)
+                        user = payload["user"]
+                        print(f"Password set and logged in as {user['username']} ({user['server'].upper()} server)")
+                        return user
+                    except Exception as setup_exc:
+                        print(f"Legacy password setup failed: {_format_api_error(setup_exc)}")
+                        continue
+                continue
+            print(f"Auth failed: {detail}")
             # After a failed forced register attempt, continue with menu flow.
             register_mode = False
 
@@ -1121,6 +1189,96 @@ def _view_stats_insights(
             print(f"  - {rec.get('title', '--')}{target}: {rec.get('detail', '--')}")
 
 
+def _view_stats_screenshots(api: BangStatsAPI, user: dict) -> None:
+    print("\nScreenshot browser filters")
+    song_query = input("Song search (blank for all): ").strip() or None
+
+    difficulty = input("Difficulty (easy/normal/hard/expert/special, blank for all): ").strip().lower() or None
+    if difficulty and difficulty not in {"easy", "normal", "hard", "expert", "special"}:
+        print("Invalid difficulty. Ignoring filter.")
+        difficulty = None
+
+    live_type = input(
+        "Live type (normal_live/event_live/challenge_live/multi_live/vs_live/free_live, blank for all): "
+    ).strip().lower() or None
+    if live_type and live_type not in {"normal_live", "event_live", "challenge_live", "multi_live", "vs_live", "free_live"}:
+        print("Invalid live type. Ignoring filter.")
+        live_type = None
+
+    include_meta_raw = input("Include meta songs? (y/N): ").strip().lower()
+    include_meta = include_meta_raw in {"y", "yes"}
+
+    sort_choice = input("Sort by [1=date,2=song,3=accuracy,4=score] (default 1): ").strip()
+    sort_by = {"2": "song_name", "3": "accuracy", "4": "score"}.get(sort_choice, "timestamp")
+
+    sort_order_choice = input("Order [1=desc,2=asc] (default 1): ").strip()
+    sort_order = "asc" if sort_order_choice == "2" else "desc"
+
+    limit_time_raw = input("Limit by date range? (y/N): ").strip().lower()
+    from_date: str | None = None
+    to_date: str | None = None
+    if limit_time_raw in {"y", "yes"}:
+        from_date = input("From date (YYYY-MM-DD): ").strip()
+        to_date = input("To date (YYYY-MM-DD): ").strip()
+        if not from_date or not to_date:
+            print("Both from and to date are required. Using all-time.")
+            from_date = None
+            to_date = None
+
+    page_size = 20
+    offset = 0
+    while True:
+        try:
+            payload = api.list_user_screenshots(
+                int(user["id"]),
+                song_query=song_query,
+                difficulty=difficulty,
+                live_type=live_type,
+                include_meta=include_meta,
+                from_date=from_date,
+                to_date=to_date,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                limit=page_size,
+                offset=offset,
+            )
+        except Exception as exc:
+            print(f"Unable to fetch screenshots: {exc}")
+            return
+
+        items = payload.get("items", [])
+        total = int(payload.get("total", 0) or 0)
+        start = min(offset + 1, total) if total else 0
+        end = min(offset + len(items), total)
+
+        print(f"\nScreenshots {start}-{end} of {total}")
+        if not items:
+            print("  No screenshots found for current filters.")
+        else:
+            for idx, row in enumerate(items, start=offset + 1):
+                song_label = row.get("song_name") or f"Song {row.get('song_id', '--')}"
+                print(
+                    f"  {idx}. {song_label} | "
+                    f"{row.get('difficulty', '--')} | {row.get('live_type', '--')} | "
+                    f"{row.get('timestamp', '--')} | {row.get('accuracy', 0)}% acc"
+                )
+
+        print("\nActions: [n]ext page, [p]revious page, [q]uit")
+        action = input("Choose action: ").strip().lower()
+        if action == "q":
+            return
+        if action == "n":
+            if offset + page_size >= total:
+                print("Already at last page.")
+            else:
+                offset += page_size
+            continue
+        if action == "p":
+            offset = max(0, offset - page_size)
+            continue
+        print("Invalid option.")
+
+
 def _stats_views_loop(
     api: BangStatsAPI,
     user: dict,
@@ -1133,6 +1291,7 @@ def _stats_views_loop(
         print("  3. Activity ranges")
         print("  4. Calendar view")
         print("  5. Insights")
+        print("  6. Screenshot browser")
         print("  q. Back to dashboard")
         choice = input("Choose stats view: ").strip().lower()
         if choice == "q":
@@ -1147,6 +1306,8 @@ def _stats_views_loop(
             _view_stats_calendar(api, user)
         elif choice == "5":
             _view_stats_insights(api, user, song_cache=song_cache)
+        elif choice == "6":
+            _view_stats_screenshots(api, user)
         else:
             print("Invalid choice.")
 

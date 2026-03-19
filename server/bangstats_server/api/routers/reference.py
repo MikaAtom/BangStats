@@ -7,6 +7,9 @@ from bangstats_server.core.services.event import EventService
 from bangstats_server.core.services.song import SongService
 
 router = APIRouter()
+song_service = SongService()
+event_service = EventService()
+band_service = BandService()
 
 
 def _chunk_response(items: list[object]) -> ReferenceChunkResponse:
@@ -22,7 +25,6 @@ def get_songs_reference(
     since_id: int = Query(default=0, ge=0),
     limit: int = Query(default=5000, ge=1, le=20000),
 ):
-    song_service = SongService()
     return _chunk_response(song_service.list_songs_since_id(since_id, limit=limit))
 
 
@@ -31,7 +33,6 @@ def get_events_reference(
     since_id: int = Query(default=0, ge=0),
     limit: int = Query(default=5000, ge=1, le=20000),
 ):
-    event_service = EventService()
     return _chunk_response(event_service.list_events_since_id(since_id, limit=limit))
 
 
@@ -40,15 +41,11 @@ def get_bands_reference(
     since_id: int = Query(default=0, ge=0),
     limit: int = Query(default=5000, ge=1, le=20000),
 ):
-    band_service = BandService()
     return _chunk_response(band_service.list_bands_since_id(since_id, limit=limit))
 
 
 @router.get("/reference/counts", response_model=ReferenceCountsResponse)
 def get_reference_counts():
-    song_service = SongService()
-    event_service = EventService()
-    band_service = BandService()
     return ReferenceCountsResponse(
         songs=len(song_service.get_all_songs()),
         events=len(event_service.get_all_events()),

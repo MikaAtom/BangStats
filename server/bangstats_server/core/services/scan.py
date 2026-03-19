@@ -264,6 +264,10 @@ class ScanService:
                 shutil.copy2(image_path, target_image_path)
         else:
             target_folder = self.cache_successful
+            if image_path and os.path.exists(image_path):
+                os.makedirs(target_folder, exist_ok=True)
+                target_image_path = os.path.join(target_folder, filename)
+                shutil.copy2(image_path, target_image_path)
 
         # Save JSON result
         json_filename = os.path.splitext(filename)[0] + ".json"
@@ -411,6 +415,15 @@ class ScanService:
                 return candidate
         return None
 
+    def find_success_image_path(self, filename: str) -> Optional[Path]:
+        safe_name = Path(filename).name
+        if not safe_name:
+            return None
+        candidate = Path(self.cache_successful) / safe_name
+        if candidate.exists() and candidate.is_file():
+            return candidate
+        return None
+
     def _persist_validated_payload(
         self,
         *,
@@ -541,6 +554,7 @@ class ScanService:
     ) -> Dict[str, Any]:
         json_path = self._resolve_error_json_path(error_type, json_filename)
         canonical_filename = self._canonical_image_filename(json_path.name)
+        preserved_image_path = self._find_error_image_path(error_type, json_path.name)
         validation_output = self.validation_service.validate(canonical_filename, corrected_scan_data)
         new_error_type = self._extract_error_type(validation_output)
 
@@ -548,7 +562,7 @@ class ScanService:
         self._remove_error_entry(error_type, json_path.name)
         target_folder = self._store_result(
             filename=canonical_filename,
-            image_path=None,
+            image_path=str(preserved_image_path) if preserved_image_path else None,
             scan_result=corrected_scan_data,
             error_type=new_error_type,
         )
@@ -617,13 +631,14 @@ class ScanService:
                 continue
 
             image_filename = self._canonical_image_filename(json_path.name)
+            preserved_image_path = self._find_error_image_path(error_type, json_path.name)
             validation_output = self.validation_service.validate(image_filename, payload)
             new_error_type = self._extract_error_type(validation_output)
 
             self._remove_error_entry(error_type, json_path.name)
             target_folder = self._store_result(
                 filename=image_filename,
-                image_path=None,
+                image_path=str(preserved_image_path) if preserved_image_path else None,
                 scan_result=payload,
                 error_type=new_error_type,
             )

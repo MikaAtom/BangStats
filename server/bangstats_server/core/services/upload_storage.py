@@ -26,6 +26,21 @@ class UploadStorageService:
         target.mkdir(parents=True, exist_ok=True)
         return target
 
+    def list_user_files(self, user_id: int) -> list[Path]:
+        user_dir = self._user_dir(user_id)
+        if not user_dir.exists():
+            return []
+        return sorted([path for path in user_dir.iterdir() if path.is_file()], key=lambda path: path.name.lower())
+
+    def resolve_user_file(self, user_id: int, filename: str) -> Path | None:
+        safe_name = Path(filename).name
+        if not safe_name:
+            return None
+        candidate = self._user_dir(user_id) / safe_name
+        if candidate.exists() and candidate.is_file():
+            return candidate
+        return None
+
     def cleanup_expired(self, user_id: int) -> int:
         now = time.time()
         max_age_seconds = max(1, SCAN_MAX_AGE_DAYS) * 24 * 60 * 60

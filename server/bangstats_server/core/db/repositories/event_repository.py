@@ -2,6 +2,7 @@ from typing import List, Optional, Union
 from sqlmodel import select
 from bangstats_server.core.db.models.event import Event
 from bangstats_server.core.db.repositories.base import BaseRepository
+from bangstats_server.core.services.event_time import event_is_active, parse_event_timestamp_ms
 
 
 class EventRepository(BaseRepository[Event]):
@@ -76,29 +77,15 @@ class EventRepository(BaseRepository[Event]):
         Returns:
             Event that is active at the given timestamp, or None if no event found.
         """
-        if isinstance(timestamp, str):
-            try:
-                timestamp_int = int(timestamp)
-            except ValueError:
-                return None
-        elif isinstance(timestamp, int):
-            timestamp_int = timestamp
-        else:
+        timestamp_int = parse_event_timestamp_ms(timestamp, language=language)
+        if timestamp_int is None:
             return None
 
         statement = select(Event)
         events = self._session.exec(statement).all()
         for event in events:
-            start = event.event_start_at.get(language)
-            end = event.event_end_at.get(language)
-            try:
-                start_int = int(start) if start is not None else None
-                end_int = int(end) if end is not None else None
-            except Exception:
-                continue
-            if start_int is not None and end_int is not None:
-                if start_int <= timestamp_int <= end_int:
-                    return event
+            if event_is_active(event, timestamp_ms=timestamp_int, language=language):
+                return event
 
     def list_since_id(self, since_id: int, limit: int = 5000) -> List[Event]:
         if not isinstance(since_id, int) or since_id < 0:

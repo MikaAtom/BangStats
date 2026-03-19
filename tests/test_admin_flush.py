@@ -9,7 +9,7 @@ from bangstats_server.app import app
 
 
 def test_admin_flush_resets_db_engine_when_db_flushed(monkeypatch):
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1, username="test")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1, username="test", role="admin")
     calls: dict[str, int] = {"reset": 0}
 
     def _fake_flush_with_backup(**_kwargs):
@@ -34,7 +34,7 @@ def test_admin_flush_resets_db_engine_when_db_flushed(monkeypatch):
 
 
 def test_admin_flush_does_not_reset_without_db_move(monkeypatch):
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1, username="test")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1, username="test", role="admin")
     calls: dict[str, int] = {"reset": 0}
 
     def _fake_flush_with_backup(**_kwargs):
@@ -59,7 +59,7 @@ def test_admin_flush_does_not_reset_without_db_move(monkeypatch):
 
 
 def test_admin_flush_resets_for_custom_db_filename(monkeypatch):
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1, username="test")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1, username="test", role="admin")
     calls: dict[str, int] = {"reset": 0}
 
     def _fake_flush_with_backup(**_kwargs):
@@ -80,5 +80,20 @@ def test_admin_flush_resets_for_custom_db_filename(monkeypatch):
             )
         assert response.status_code == 200
         assert calls["reset"] == 1
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_admin_flush_requires_admin_role():
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1, username="test", role="user")
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/flush",
+                json={"remote_cache": False, "scan_cache": False, "db": True},
+            )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Admin access required"
     finally:
         app.dependency_overrides.pop(get_current_user, None)

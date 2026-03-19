@@ -1,9 +1,14 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from bangstats_server.api.dependencies import assert_user_scope, get_current_user
 from bangstats_server.api.schemas.stats import (
+    EventStatsResponse,
+    ProgressionResponse,
+    RecapResponse,
+    SongRankingsResponse,
+    SongJourneyResponse,
     StatsActivityRangeResponse,
     StatsCalendarResponse,
     StatsInsightsResponse,
@@ -15,24 +20,37 @@ from bangstats_server.api.schemas.stats import (
     SongStatsResponse,
     StatsResponse,
 )
+from bangstats_server.core.config import META_SONG_IDS
 from bangstats_server.core.services.screenshot import ScreenshotService
+from bangstats_server.core.services.event import EventService
+from bangstats_server.core.services.event_time import parse_event_timestamp_ms
+from bangstats_server.core.services.scan import ScanService
+from bangstats_server.core.services.upload_storage import UploadStorageService
 from bangstats_server.core.services.song import SongService
 from bangstats_server.core.db.models.user import User
 from bangstats_server.core.services.stats import (
     compute_activity_range,
+    compute_event_stats,
     compute_calendar_month_view,
     compute_difficulty_detail,
     compute_general_summary,
     compute_insights,
     compute_milestones,
+    compute_progression,
     compute_recent_plays,
+    compute_recap,
+    compute_song_rankings,
+    compute_song_journey,
     compute_song_difficulty_overview,
     compute_top_songs,
+    filter_stats_plays,
+    filter_excluded_songs,
 )
 
 router = APIRouter()
 song_service = SongService
 screenshot_service = ScreenshotService
+event_service = EventService
 
 
 def _song_service_instance():
@@ -101,7 +119,7 @@ def _resolve_date_range(preset: str, from_date: str | None, to_date: str | None)
         range_start = _parse_iso_date(from_date, "from_date")
         range_end = _parse_iso_date(to_date, "to_date")
     else:
-        presets = {"7d": 7, "30d": 30, "90d": 90}
+        presets = {"7d": 7, "30d": 30, "90d": 90, "1y": 365}
         days = presets.get(preset)
         if days is None:
             raise HTTPException(status_code=400, detail=f"Invalid preset: {preset}")
@@ -121,19 +139,142 @@ def _song_length_seconds(song: object | None) -> int:
         return 0
 
 
-@router.get("/users/{user_id}/stats", response_model=StatsResponse)
-def get_user_stats(user_id: int, current_user: User = Depends(get_current_user)):
-    user_id = assert_user_scope(user_id, current_user)
+def _event_service_instance():
+    if isinstance(event_service, type):
+        return event_service()
+    return event_service
+
+
+def _resolve_exclusion_context(current_user: User, *, apply_meta_exclusions: bool = True) -> dict:
+    server_defaults = sorted({int(song_id) for song_id in META_SONG_IDS if int(song_id) > 0})
+    user_excluded = sorted({int(song_id) for song_id in (getattr(current_user, "excluded_song_ids", None) or []) if int(song_id) > 0})
+    effective = sorted(set(server_defaults) | set(user_excluded))
+    return {
+        "server_meta_song_ids": server_defaults,
+        "user_excluded_song_ids": user_excluded,
+        "effective_song_ids": effective,
+        "is_active": bool(effective) and apply_meta_exclusions,
+    }
+
+
+def _filtered_user_screenshots(
+    user_id: int,
+    current_user: User,
+    *,
+    difficulty: str | None = None,
+    live_type: str | None = None,
+    include_meta: bool = False,
+):
     screenshots = _get_user_screenshots_or_404(user_id)
+    context = _resolve_exclusion_context(current_user, apply_meta_exclusions=not include_meta)
+    filtered = list(screenshots)
+    if not include_meta:
+        filtered = filter_excluded_songs(
+            filtered,
+            excluded_song_ids=set(context["effective_song_ids"]),
+        )
+    filtered = filter_stats_plays(filtered, difficulty=difficulty, live_type=live_type)
+    return filtered, context
+
+
+def _resolve_image_url(user_id: int, filename: str | None) -> str | None:
+    if not filename:
+        return None
+    storage = UploadStorageService()
+    scan_service = ScanService()
+    if storage.resolve_user_file(user_id, filename) is not None:
+        return f"/api/users/{user_id}/uploads/{filename}"
+    if scan_service.find_success_image_path(filename) is not None:
+        matches = _screenshot_service_instance().get_screenshots_by_user(user_id)
+        for screenshot in matches:
+            if getattr(screenshot, "filename", None) == filename and getattr(screenshot, "id", None):
+                return f"/api/users/{user_id}/screenshots/{int(screenshot.id)}/image"
+    return None
+
+
+def _with_image_url(user_id: int, meta: dict | None):
+    if not meta:
+        return None
+    payload = dict(meta)
+    payload["image_url"] = _resolve_image_url(user_id, payload.get("filename"))
+    return payload
+
+
+def _parse_event_boundary(value, server: str):
+    timestamp_ms = parse_event_timestamp_ms(value, language=server)
+    if timestamp_ms is None:
+        return None
+    try:
+        return datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc).date()
+    except (ValueError, OSError):
+        return None
+
+
+def _resolve_event_range(event_id: int, server: str):
+    event = _event_service_instance().get_event_by_event_id(event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail=f"Event not found: {event_id}")
+    start = _parse_event_boundary(getattr(event, "event_start_at", None), server)
+    end = _parse_event_boundary(getattr(event, "event_end_at", None), server)
+    if start is None or end is None:
+        raise HTTPException(status_code=400, detail="Event dates not found in repo")
+    return event, start, end
+
+
+def _range_for_scope(scope: str, anchor: date):
+    if scope == "weekly":
+        start = anchor - timedelta(days=anchor.weekday())
+        return start, start + timedelta(days=6)
+    if scope == "monthly":
+        start = anchor.replace(day=1)
+        if start.month == 12:
+            next_month = start.replace(year=start.year + 1, month=1, day=1)
+        else:
+            next_month = start.replace(month=start.month + 1, day=1)
+        return start, next_month - timedelta(days=1)
+    if scope == "seasonal":
+        return anchor - timedelta(days=89), anchor
+    if scope == "yearly":
+        return anchor.replace(month=1, day=1), anchor.replace(month=12, day=31)
+    return anchor, anchor
+
+
+@router.get("/users/{user_id}/stats", response_model=StatsResponse)
+def get_user_stats(
+    user_id: int,
+    difficulty: str | None = Query(None),
+    live_type: str | None = Query(None),
+    include_meta: bool = Query(False),
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    screenshots, exclusion_context = _filtered_user_screenshots(
+        user_id,
+        current_user,
+        difficulty=difficulty,
+        live_type=live_type,
+        include_meta=include_meta,
+    )
+    song_service = _song_service_instance()
 
     summary = compute_general_summary(screenshots)
-    top_songs = compute_top_songs(screenshots, n=5)
+    top_songs = compute_top_songs(screenshots, n=8)
+    for item in top_songs:
+        song_id = int(item.get("song_id", 0))
+        song = song_service.get_song_by_internal_id(song_id) if song_id > 0 else None
+        item["song_name"] = _song_display_name(song, current_user.server, fallback_id=song_id)
     recent = compute_recent_plays(screenshots, n=5)
+    for item in recent:
+        song_id = int(item.get("song_id", 0))
+        song = song_service.get_song_by_internal_id(song_id) if song_id > 0 else None
+        item["song_name"] = _song_display_name(song, current_user.server, fallback_id=song_id)
+        item["image_url"] = _resolve_image_url(user_id, item.get("filename"))
 
     return StatsResponse(
         summary=summary,
         top_songs=top_songs,
         recent=recent,
+        exclusion_context=exclusion_context,
     )
 
 
@@ -170,6 +311,45 @@ def search_user_stat_songs(
     return SongSearchResponse(query=query, limit=limit, results=results)
 
 
+@router.get("/users/{user_id}/stats/songs/rankings", response_model=SongRankingsResponse)
+def get_user_song_rankings(
+    user_id: int,
+    difficulty: str | None = Query(None),
+    live_type: str | None = Query(None),
+    include_meta: bool = Query(False),
+    sort_by: str = Query("play_count"),
+    limit: int = Query(25, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    screenshots, exclusion_context = _filtered_user_screenshots(
+        user_id,
+        current_user,
+        difficulty=difficulty,
+        live_type=live_type,
+        include_meta=include_meta,
+    )
+    song_names = {
+        int(song.internal_song_id): _song_display_name(song, current_user.server)
+        for song in _song_service_instance().get_all_songs()
+    }
+    rankings = compute_song_rankings(
+        screenshots,
+        song_names=song_names,
+        sort_by=sort_by,
+        limit=limit,
+    )
+    for item in rankings:
+        item["latest_play"] = _with_image_url(user_id, item.get("latest_play"))
+    return SongRankingsResponse(
+        sort_by=sort_by,
+        difficulty=difficulty.strip().lower() if isinstance(difficulty, str) and difficulty.strip() else None,
+        live_type=live_type.strip().lower() if isinstance(live_type, str) and live_type.strip() else None,
+        items=rankings,
+        exclusion_context=exclusion_context,
+    )
+
+
 @router.get("/users/{user_id}/stats/songs/{song_id}", response_model=SongStatsResponse)
 def get_user_song_stats(
     user_id: int,
@@ -182,6 +362,7 @@ def get_user_song_stats(
     song_service = _song_service_instance()
     screenshot_service = _screenshot_service_instance()
     user_id = assert_user_scope(user_id, current_user)
+    exclusion_context = _resolve_exclusion_context(current_user)
     song = song_service.get_song_by_internal_id(song_id)
     if not song:
         raise HTTPException(status_code=404, detail=f"Song not found: {song_id}")
@@ -221,27 +402,53 @@ def get_user_song_stats(
                 status_code=404,
                 detail=f"No plays found for song {song_id} [{normalized_difficulty}]",
             )
-        detail = SongDifficultyDetail(
-            **compute_difficulty_detail(
-                plays,
-                song_length_seconds=_song_length_seconds(song),
-                session_gap_minutes=session_gap_minutes,
-            )
+        detail_payload = compute_difficulty_detail(
+            plays,
+            song_length_seconds=_song_length_seconds(song),
+            session_gap_minutes=session_gap_minutes,
         )
+        for field_name in ["first_played", "last_played", "first_fc", "last_fc", "first_ap", "last_ap"]:
+            detail_payload[field_name] = _with_image_url(user_id, detail_payload.get(field_name))
+        detail = SongDifficultyDetail(**detail_payload)
 
     return SongStatsResponse(
         song_id=song_id,
         requested_difficulty=normalized_difficulty,
-        difficulty_overview=overview,
+        difficulty_overview=[
+            SongDifficultyOverviewItem(
+                difficulty=item.difficulty,
+                total_plays=item.total_plays,
+                first_played=_with_image_url(user_id, item.first_played.model_dump()) if item.first_played else None,
+                estimated_time_played_seconds=item.estimated_time_played_seconds,
+                estimated_time_played_human=item.estimated_time_played_human,
+            )
+            for item in overview
+        ],
         detail=detail,
+        exclusion_context=exclusion_context,
     )
 
 
 @router.get("/users/{user_id}/stats/milestones", response_model=StatsMilestonesResponse)
-def get_user_stats_milestones(user_id: int, current_user: User = Depends(get_current_user)):
+def get_user_stats_milestones(
+    user_id: int,
+    difficulty: str | None = Query(None),
+    live_type: str | None = Query(None),
+    include_meta: bool = Query(False),
+    current_user: User = Depends(get_current_user),
+):
     user_id = assert_user_scope(user_id, current_user)
-    screenshots = _get_user_screenshots_or_404(user_id)
-    return StatsMilestonesResponse(**compute_milestones(screenshots))
+    screenshots, _ = _filtered_user_screenshots(
+        user_id,
+        current_user,
+        difficulty=difficulty,
+        live_type=live_type,
+        include_meta=include_meta,
+    )
+    payload = compute_milestones(screenshots)
+    for item in payload.get("milestones", []):
+        item["meta"] = _with_image_url(user_id, item.get("meta"))
+    return StatsMilestonesResponse(**payload)
 
 
 @router.get("/users/{user_id}/stats/activity", response_model=StatsActivityRangeResponse)
@@ -250,10 +457,19 @@ def get_user_stats_activity(
     preset: str = Query("30d"),
     from_date: str | None = Query(None),
     to_date: str | None = Query(None),
+    difficulty: str | None = Query(None),
+    live_type: str | None = Query(None),
+    include_meta: bool = Query(False),
     current_user: User = Depends(get_current_user),
 ):
     user_id = assert_user_scope(user_id, current_user)
-    screenshots = _get_user_screenshots_or_404(user_id)
+    screenshots, _ = _filtered_user_screenshots(
+        user_id,
+        current_user,
+        difficulty=difficulty,
+        live_type=live_type,
+        include_meta=include_meta,
+    )
     range_start, range_end = _resolve_date_range(preset, from_date, to_date)
 
     return StatsActivityRangeResponse(
@@ -270,10 +486,19 @@ def get_user_stats_calendar(
     user_id: int,
     year: int | None = Query(None, ge=2000, le=2200),
     month: int | None = Query(None, ge=1, le=12),
+    difficulty: str | None = Query(None),
+    live_type: str | None = Query(None),
+    include_meta: bool = Query(False),
     current_user: User = Depends(get_current_user),
 ):
     user_id = assert_user_scope(user_id, current_user)
-    screenshots = _get_user_screenshots_or_404(user_id)
+    screenshots, _ = _filtered_user_screenshots(
+        user_id,
+        current_user,
+        difficulty=difficulty,
+        live_type=live_type,
+        include_meta=include_meta,
+    )
 
     now = datetime.now(timezone.utc)
     selected_year = year if year is not None else now.year
@@ -294,12 +519,21 @@ def get_user_stats_insights(
     preset: str = Query("30d"),
     from_date: str | None = Query(None),
     to_date: str | None = Query(None),
+    difficulty: str | None = Query(None),
+    live_type: str | None = Query(None),
+    include_meta: bool = Query(False),
     session_gap_minutes: int = Query(45, ge=5, le=240),
     current_user: User = Depends(get_current_user),
 ):
     song_service = _song_service_instance()
     user_id = assert_user_scope(user_id, current_user)
-    screenshots = _get_user_screenshots_or_404(user_id)
+    screenshots, _ = _filtered_user_screenshots(
+        user_id,
+        current_user,
+        difficulty=difficulty,
+        live_type=live_type,
+        include_meta=include_meta,
+    )
     range_start, range_end = _resolve_date_range(preset, from_date, to_date)
 
     song_ids = {
@@ -324,4 +558,181 @@ def get_user_stats_insights(
         song_lengths_seconds=song_lengths_seconds,
     )
 
+    for item in payload.get("practice_periods", []):
+        song_id = int(item.get("song_id", 0))
+        song = song_map.get(song_id)
+        item["song_name"] = _song_display_name(song, current_user.server, fallback_id=song_id)
+    repetition = payload.get("repetition", {})
+    for key in ["most_looped_songs", "revisited_after_break"]:
+        for item in repetition.get(key, []):
+            song_id = int(item.get("song_id", 0))
+            song = song_map.get(song_id)
+            item["song_name"] = _song_display_name(song, current_user.server, fallback_id=song_id)
+
     return StatsInsightsResponse(**payload)
+
+
+@router.get("/users/{user_id}/stats/progression", response_model=ProgressionResponse)
+def get_user_stats_progression(
+    user_id: int,
+    scope: str = Query("monthly"),
+    count: int = Query(6, ge=2, le=24),
+    anchor_date: str | None = Query(None),
+    difficulty: str | None = Query(None),
+    live_type: str | None = Query(None),
+    include_meta: bool = Query(False),
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    screenshots, exclusion_context = _filtered_user_screenshots(
+        user_id,
+        current_user,
+        difficulty=difficulty,
+        live_type=live_type,
+        include_meta=include_meta,
+    )
+    allowed_scopes = {"weekly", "monthly", "yearly"}
+    if scope not in allowed_scopes:
+        raise HTTPException(status_code=400, detail=f"Invalid scope: {scope}")
+    anchor = _parse_iso_date(anchor_date, "anchor_date") if anchor_date else datetime.now(timezone.utc).date()
+    payload = compute_progression(screenshots, scope=scope, anchor=anchor, count=count)
+    return ProgressionResponse(**payload, exclusion_context=exclusion_context)
+
+
+@router.get("/users/{user_id}/stats/events/{event_id}", response_model=EventStatsResponse)
+@router.get("/users/{user_id}/stats/event-focus/{event_id}", response_model=EventStatsResponse)
+def get_user_event_stats(
+    user_id: int,
+    event_id: int,
+    difficulty: str | None = Query(None),
+    live_type: str | None = Query(None),
+    include_meta: bool = Query(False),
+    session_gap_minutes: int = Query(45, ge=5, le=240),
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    screenshots, exclusion_context = _filtered_user_screenshots(
+        user_id,
+        current_user,
+        difficulty=difficulty,
+        live_type=live_type,
+        include_meta=include_meta,
+    )
+    event, start, end = _resolve_event_range(event_id, current_user.server)
+    song_map = {
+        int(song.internal_song_id): _song_display_name(song, current_user.server)
+        for song in _song_service_instance().get_all_songs()
+    }
+    payload = compute_event_stats(
+        screenshots,
+        song_names=song_map,
+        event_name=getattr(event, "event_name", {}).get(current_user.server) if isinstance(getattr(event, "event_name", None), dict) else getattr(event, "event_name", None),
+        event_type=getattr(event, "event_type", None),
+        event_id=event_id,
+        from_date=start,
+        to_date=end,
+        session_gap_minutes=session_gap_minutes,
+    )
+    return EventStatsResponse(**payload, exclusion_context=exclusion_context)
+
+
+@router.get("/users/{user_id}/stats/songs/{song_id}/journey", response_model=SongJourneyResponse)
+def get_user_song_journey(
+    user_id: int,
+    song_id: int,
+    difficulty: str | None = Query(None),
+    session_gap_minutes: int = Query(45, ge=5, le=240),
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    song = _song_service_instance().get_song_by_internal_id(song_id)
+    if not song:
+        raise HTTPException(status_code=404, detail=f"Song not found: {song_id}")
+    all_song_plays = _screenshot_service_instance().get_screenshots_by_song(user_id, song_id)
+    if not all_song_plays:
+        raise HTTPException(status_code=404, detail=f"No plays found for song {song_id}")
+    target_difficulty = difficulty.strip().lower() if isinstance(difficulty, str) and difficulty.strip() else None
+    if target_difficulty is None:
+        grouped: dict[str, int] = {}
+        for play in all_song_plays:
+            diff = str(getattr(play, "difficulty", "")).strip().lower()
+            if diff:
+                grouped[diff] = grouped.get(diff, 0) + 1
+        if not grouped:
+            raise HTTPException(status_code=404, detail="No playable difficulties found")
+        target_difficulty = sorted(grouped.items(), key=lambda item: (-item[1], _difficulty_sort_key(item[0])))[0][0]
+    plays = _screenshot_service_instance().get_screenshots_by_song(user_id, song_id, target_difficulty)
+    payload = compute_song_journey(
+        plays,
+        song_id=song_id,
+        song_name=_song_display_name(song, current_user.server, fallback_id=song_id),
+        difficulty=target_difficulty,
+        song_length_seconds=_song_length_seconds(song),
+        session_gap_minutes=session_gap_minutes,
+    )
+    for field_name in ["first_played", "first_fc", "first_ap"]:
+        payload[field_name] = _with_image_url(user_id, payload.get(field_name))
+    for item in payload.get("timeline", []):
+        item["image_url"] = _resolve_image_url(user_id, item.get("filename"))
+    return SongJourneyResponse(**payload, exclusion_context=_resolve_exclusion_context(current_user))
+
+
+@router.get("/users/{user_id}/stats/recap", response_model=RecapResponse)
+def get_user_recap(
+    user_id: int,
+    scope: str = Query("monthly"),
+    anchor_date: str | None = Query(None),
+    event_id: int | None = Query(None),
+    difficulty: str | None = Query(None),
+    live_type: str | None = Query(None),
+    include_meta: bool = Query(False),
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    screenshots, exclusion_context = _filtered_user_screenshots(
+        user_id,
+        current_user,
+        difficulty=difficulty,
+        live_type=live_type,
+        include_meta=include_meta,
+    )
+    today = datetime.now(timezone.utc).date()
+    anchor = _parse_iso_date(anchor_date, "anchor_date") if anchor_date else today
+    event_name = None
+    if scope == "event":
+        if event_id is None:
+            raise HTTPException(status_code=400, detail="event_id is required for event scope")
+        event, from_date, to_date = _resolve_event_range(event_id, current_user.server)
+        event_name = getattr(event, "event_name", {}).get(current_user.server) if isinstance(getattr(event, "event_name", None), dict) else getattr(event, "event_name", None)
+    else:
+        if scope not in {"weekly", "monthly", "seasonal", "yearly"}:
+            raise HTTPException(status_code=400, detail=f"Invalid scope: {scope}")
+        from_date, to_date = _range_for_scope(scope, anchor)
+    compare_from = from_date - timedelta(days=(to_date - from_date).days + 1)
+    compare_to = from_date - timedelta(days=1)
+    compare_screenshots = [
+        play
+        for play in screenshots
+        if isinstance(getattr(play, "timestamp", None), datetime)
+        and compare_from <= getattr(play, "timestamp").date() <= compare_to
+    ]
+    song_map = {
+        int(song.internal_song_id): _song_display_name(song, current_user.server)
+        for song in _song_service_instance().get_all_songs()
+    }
+    payload = compute_recap(
+        screenshots,
+        scope=scope,
+        from_date=from_date,
+        to_date=to_date,
+        song_names=song_map,
+        compare_screenshots=compare_screenshots,
+        event_id=event_id,
+        event_name=event_name,
+    )
+    for song_key in ["top_songs", "new_songs", "most_practiced"]:
+        for item in payload.get(song_key, []):
+            item["latest_play"] = _with_image_url(user_id, item.get("latest_play"))
+    for highlight in payload.get("highlights", []):
+        highlight["screenshot"] = _with_image_url(user_id, highlight.get("screenshot"))
+    return RecapResponse(**payload, exclusion_context=exclusion_context)

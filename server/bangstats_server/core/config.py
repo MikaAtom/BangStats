@@ -55,6 +55,18 @@ def _get_csv_env(name: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _get_csv_int_env(name: str) -> list[int]:
+    values: list[int] = []
+    for item in _get_csv_env(name):
+        try:
+            parsed = int(item)
+        except ValueError:
+            continue
+        if parsed > 0 and parsed not in values:
+            values.append(parsed)
+    return values
+
+
 def _get_bool_env(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None or not raw.strip():
@@ -132,6 +144,7 @@ FAKE_SCAN_ERROR_WEIGHTS = (
     .strip()
     .lower()
 )
+META_SONG_IDS = _get_csv_int_env("BANGSTATS_META_SONG_IDS")
 
 
 def _merge_tree(source_dir: Path, destination_dir: Path) -> None:

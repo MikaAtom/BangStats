@@ -113,9 +113,53 @@ class AuthService:
             raise RuntimeError("rate_limited")
 
         user = self._users.get_user_by_username(username)
+        if user and not user.password_hash:
+            raise RuntimeError("password_setup_required")
         if not user or not self.verify_password(password, user.password_hash):
             self._rate_limiter.register_failure(username=username, ip=ip, now=now)
             raise ValueError("Invalid username or password")
+
+        self._rate_limiter.register_success(username=username, ip=ip)
+        token = self.issue_token(user_id=int(user.id))
+        return user, token
+
+    def activate_legacy_account(
+        self,
+        *,
+        username: str,
+        game_id: str,
+        password: str,
+    ) -> tuple[User, str]:
+        user = self._users.get_user_by_username(username)
+        if not user:
+            raise ValueError("Legacy account not found")
+        if user.game_id != game_id:
+            raise ValueError("Game ID does not match")
+        if user.password_hash:
+            raise ValueError("Account already has a password")
+
+        updated = self._users.update_user(
+            int(user.id),
+            {"password_hash": self.hash_password(password)},
+        )
+        token = self.issue_token(user_id=int(updated.id))
+        return updated, token
+
+    def login_legacy(
+        self,
+        *,
+        username: str,
+        game_id: str,
+        ip: str,
+    ) -> tuple[User, str]:
+        now = self._utc_now_naive()
+        if not self._rate_limiter.check_allowed(username=username, ip=ip, now=now):
+            raise RuntimeError("rate_limited")
+
+        user = self._users.get_user_by_username(username)
+        if not user or user.game_id != game_id or user.password_hash:
+            self._rate_limiter.register_failure(username=username, ip=ip, now=now)
+            raise ValueError("Invalid legacy username or game ID")
 
         self._rate_limiter.register_success(username=username, ip=ip)
         token = self.issue_token(user_id=int(user.id))

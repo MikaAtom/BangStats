@@ -8,6 +8,7 @@ class StatsResponse(BaseModel):
     summary: Dict[str, Any]
     top_songs: List[Dict[str, Any]]
     recent: List[Dict[str, Any]]
+    exclusion_context: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SongSearchItem(BaseModel):
@@ -21,9 +22,28 @@ class SongSearchResponse(BaseModel):
     results: List[SongSearchItem] = Field(default_factory=list)
 
 
+class SongRankingItem(BaseModel):
+    song_id: int
+    song_name: Optional[str] = None
+    play_count: int = 0
+    fc_count: int = 0
+    ap_count: int = 0
+    skill_score: float = 0.0
+    latest_play: Optional["PlayMeta"] = None
+
+
+class SongRankingsResponse(BaseModel):
+    sort_by: str
+    difficulty: Optional[str] = None
+    live_type: Optional[str] = None
+    items: List[SongRankingItem] = Field(default_factory=list)
+    exclusion_context: Dict[str, Any] = Field(default_factory=dict)
+
+
 class PlayMeta(BaseModel):
     timestamp: Optional[datetime] = None
     filename: Optional[str] = None
+    image_url: Optional[str] = None
 
 
 class SongDifficultyOverviewItem(BaseModel):
@@ -56,6 +76,7 @@ class SongDifficultyDetail(BaseModel):
     longest_session_minutes: int = 0
     practice_burst_count: int = 0
     max_practice_burst_plays: int = 0
+    skill_score: float = 0.0
 
 
 class SongStatsResponse(BaseModel):
@@ -63,6 +84,7 @@ class SongStatsResponse(BaseModel):
     requested_difficulty: Optional[str] = None
     difficulty_overview: List[SongDifficultyOverviewItem] = Field(default_factory=list)
     detail: Optional[SongDifficultyDetail] = None
+    exclusion_context: Dict[str, Any] = Field(default_factory=dict)
 
 
 class MilestoneItem(BaseModel):
@@ -181,3 +203,112 @@ class StatsInsightsResponse(BaseModel):
     practice_periods: List[PracticePeriodItem] = Field(default_factory=list)
     repetition: RepetitionInsights
     recommendations: List[InsightRecommendation] = Field(default_factory=list)
+
+
+class EventStatsSongItem(BaseModel):
+    song_id: int
+    song_name: Optional[str] = None
+    play_count: int = 0
+    fc_count: int = 0
+    ap_count: int = 0
+    skill_score: float = 0.0
+
+
+class EventStatsResponse(BaseModel):
+    event_id: int
+    event_name: Optional[str] = None
+    event_type: Optional[str] = None
+    from_date: str
+    to_date: str
+    summary: Dict[str, Any]
+    live_types: Dict[str, int] = Field(default_factory=dict)
+    active_hours: Dict[str, int] = Field(default_factory=dict)
+    top_songs: List[EventStatsSongItem] = Field(default_factory=list)
+    total_sessions: int = 0
+    longest_session_minutes: int = 0
+    fc_gains: int = 0
+    ap_gains: int = 0
+    skill_score: float = 0.0
+    exclusion_context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ProgressionPoint(BaseModel):
+    label: str
+    from_date: str
+    to_date: str
+    plays: int = 0
+    accuracy: float = 0.0
+    skill_score: float = 0.0
+    fc: int = 0
+    ap: int = 0
+
+
+class ProgressionResponse(BaseModel):
+    scope: str
+    points: List[ProgressionPoint] = Field(default_factory=list)
+    delta_skill_score: float = 0.0
+    delta_accuracy: float = 0.0
+    exclusion_context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TimelinePoint(BaseModel):
+    type: str
+    label: str
+    timestamp: Optional[datetime] = None
+    filename: Optional[str] = None
+    image_url: Optional[str] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SongJourneyResponse(BaseModel):
+    song_id: int
+    song_name: Optional[str] = None
+    difficulty: str
+    total_plays: int = 0
+    first_played: Optional[PlayMeta] = None
+    first_fc: Optional[PlayMeta] = None
+    first_ap: Optional[PlayMeta] = None
+    plays_before_fc: Optional[int] = None
+    plays_before_ap: Optional[int] = None
+    skill_score: float = 0.0
+    practice_periods: List[Dict[str, Any]] = Field(default_factory=list)
+    timeline: List[TimelinePoint] = Field(default_factory=list)
+    exclusion_context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RecapHighlight(BaseModel):
+    title: str
+    value: str
+    detail: str
+    screenshot: Optional[PlayMeta] = None
+
+
+class RecapSongItem(BaseModel):
+    song_id: int
+    song_name: Optional[str] = None
+    play_count: int = 0
+    fc_count: int = 0
+    ap_count: int = 0
+    skill_score: float = 0.0
+    latest_play: Optional[PlayMeta] = None
+
+
+class RecapResponse(BaseModel):
+    scope: str
+    title: str
+    from_date: str
+    to_date: str
+    event_id: Optional[int] = None
+    event_name: Optional[str] = None
+    summary: Dict[str, Any]
+    skill_score: float = 0.0
+    skill_score_delta: float = 0.0
+    top_songs: List[RecapSongItem] = Field(default_factory=list)
+    new_songs: List[RecapSongItem] = Field(default_factory=list)
+    most_practiced: List[RecapSongItem] = Field(default_factory=list)
+    live_types: Dict[str, int] = Field(default_factory=dict)
+    active_hours: Dict[str, int] = Field(default_factory=dict)
+    highlights: List[RecapHighlight] = Field(default_factory=list)
+    streaks: Dict[str, int] = Field(default_factory=dict)
+    sessions: Dict[str, Any] = Field(default_factory=dict)
+    exclusion_context: Dict[str, Any] = Field(default_factory=dict)

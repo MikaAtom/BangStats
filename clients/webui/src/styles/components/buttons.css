@@ -1,0 +1,98 @@
+/* Button Styles - Flat design, no gradients */
+
+.button {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-5);
+  cursor: pointer;
+  font-weight: var(--font-semibold);
+  transition: transform var(--transition-fast),
+              background var(--transition-fast),
+              border-color var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Primary Button - Purple */
+.button.primary {
+  background: var(--purple-500);
+  color: var(--purple-50);
+  border-color: var(--purple-600);
+}
+
+.button.primary:hover:not(:disabled) {
+  background: var(--purple-600);
+}
+
+.button.primary:active:not(:disabled) {
+  background: var(--purple-700);
+}
+
+/* Accent Button - Lighter purple */
+.button.accent {
+  background: var(--purple-400);
+  color: var(--purple-50);
+  border-color: var(--purple-500);
+}
+
+.button.accent:hover:not(:disabled) {
+  background: var(--purple-500);
+}
+
+/* Danger Button - Red */
+.button.danger {
+  background: var(--danger);
+  color: white;
+  border-color: #e65858;
+}
+
+.button.danger:hover:not(:disabled) {
+  background: #e65858;
+}
+
+/* Ghost Button - Transparent with border */
+.button.ghost {
+  background: transparent;
+  color: var(--purple-400);
+  border-color: var(--border-strong);
+}
+
+.button.ghost:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  border-color: var(--purple-600);
+}
+
+/* Button Row */
+.button-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.button-row.tight {
+  gap: var(--space-2);
+}
+
+@media (max-width: 860px) {
+  .button-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

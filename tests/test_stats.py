@@ -3,14 +3,17 @@ from types import SimpleNamespace
 
 from bangstats_server.core.services.stats import (
     compute_activity_range,
+    compute_active_hours,
     compute_calendar_month_view,
     compute_difficulty_detail,
     compute_general_summary,
     compute_insights,
     compute_milestones,
     compute_recent_plays,
+    compute_song_rankings,
     compute_song_difficulty_overview,
     compute_top_songs,
+    filter_stats_plays,
 )
 
 
@@ -58,7 +61,7 @@ def test_general_summary():
 
 def test_general_summary_empty():
     summary = compute_general_summary([])
-    assert summary == {"total_plays": 0, "total_fc": 0, "total_ap": 0, "accuracy": 0.0}
+    assert summary == {"total_plays": 0, "total_fc": 0, "total_ap": 0, "accuracy": 0.0, "skill_score": 0.0}
 
 
 def test_top_songs():
@@ -218,4 +221,43 @@ def test_compute_insights_sessionization_practice_repetition_and_guards():
     assert result["repetition"]["repeated_plays"] == 3
     assert result["repetition"]["most_looped_songs"][0]["song_id"] in {1, 2}
     assert result["data_quality"]["sparse_data"] is True
-    assert len(result["recommendations"]) >= 1
+    assert result["recommendations"] == []
+
+
+def test_compute_song_rankings_and_stat_filters():
+    base = datetime(2026, 3, 10, 12, 0, 0)
+    plays = [
+        _play(song_id=1, difficulty="expert", timestamp=base, filename="a.png", all_perfect=True),
+        _play(song_id=1, difficulty="expert", timestamp=base + timedelta(minutes=5), filename="b.png"),
+        _play(song_id=2, difficulty="hard", timestamp=base + timedelta(minutes=10), filename="c.png", full_combo=False),
+    ]
+    for play, live_type in zip(plays, ["normal_live", "normal_live", "event_live"], strict=True):
+        setattr(play, "live_type", live_type)
+
+    filtered = filter_stats_plays(plays, difficulty="expert", live_type="normal_live")
+    assert len(filtered) == 2
+    assert all(play.song_id == 1 for play in filtered)
+
+    rankings = compute_song_rankings(
+        plays,
+        song_names={1: "Song A", 2: "Song B"},
+        sort_by="skill_score",
+        limit=5,
+    )
+    assert rankings[0]["song_name"] == "Song A"
+    assert rankings[0]["play_count"] == 2
+    assert rankings[0]["latest_play"]["filename"] == "b.png"
+
+
+def test_compute_active_hours_uses_numeric_hour_keys():
+    base = datetime(2026, 3, 10, 0, 5, 0)
+    plays = [
+        _play(song_id=1, difficulty="expert", timestamp=base),
+        _play(song_id=1, difficulty="expert", timestamp=base.replace(hour=8, minute=30)),
+        _play(song_id=1, difficulty="expert", timestamp=base.replace(hour=8, minute=45)),
+        _play(song_id=1, difficulty="expert", timestamp=base.replace(hour=19, minute=10)),
+    ]
+
+    result = compute_active_hours(plays)
+
+    assert result == {"0": 1, "8": 2, "19": 1}

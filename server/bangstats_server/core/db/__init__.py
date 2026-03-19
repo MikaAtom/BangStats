@@ -47,6 +47,10 @@ def _run_schema_migrations():
                 connection.execute(
                     text("ALTER TABLE user ADD COLUMN password_hash VARCHAR DEFAULT ''")
                 )
+            if "role" not in existing_columns:
+                connection.execute(
+                    text("ALTER TABLE user ADD COLUMN role VARCHAR DEFAULT 'user'")
+                )
             if "server_folder_authorized" not in existing_columns:
                 connection.execute(
                     text("ALTER TABLE user ADD COLUMN server_folder_authorized BOOLEAN DEFAULT 0")
@@ -54,6 +58,10 @@ def _run_schema_migrations():
             if "sync_command" not in existing_columns:
                 connection.execute(
                     text("ALTER TABLE user ADD COLUMN sync_command VARCHAR")
+                )
+            if "excluded_song_ids" not in existing_columns:
+                connection.execute(
+                    text("ALTER TABLE user ADD COLUMN excluded_song_ids JSON")
                 )
 
 

@@ -36,6 +36,26 @@ class BangStatsAPI:
         self.set_auth_token(data.get("token"))
         return data
 
+    def legacy_login(self, username: str, game_id: str) -> dict[str, Any]:
+        response = self._client.post(
+            "/api/auth/legacy-login",
+            json={"username": username, "game_id": game_id},
+        )
+        response.raise_for_status()
+        data = response.json()
+        self.set_auth_token(data.get("token"))
+        return data
+
+    def legacy_password_setup(self, username: str, game_id: str, password: str) -> dict[str, Any]:
+        response = self._client.post(
+            "/api/auth/legacy-password-setup",
+            json={"username": username, "game_id": game_id, "password": password},
+        )
+        response.raise_for_status()
+        data = response.json()
+        self.set_auth_token(data.get("token"))
+        return data
+
     def logout(self) -> None:
         if self._token:
             response = self._client.post("/api/auth/logout")
@@ -99,6 +119,11 @@ class BangStatsAPI:
 
     def get_current_event(self, server: str) -> dict[str, Any] | None:
         response = self._client.get("/api/events/current", params={"server": server})
+        response.raise_for_status()
+        return response.json()
+
+    def get_health(self) -> dict[str, Any]:
+        response = self._client.get("/api/health")
         response.raise_for_status()
         return response.json()
 
@@ -551,6 +576,43 @@ class BangStatsAPI:
             f"/api/users/{user_id}/stats/insights",
             params=params,
         )
+        response.raise_for_status()
+        return response.json()
+
+    def list_user_screenshots(
+        self,
+        user_id: int,
+        *,
+        song_query: str | None = None,
+        difficulty: str | None = None,
+        live_type: str | None = None,
+        include_meta: bool = False,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        sort_by: str = "timestamp",
+        sort_order: str = "desc",
+        limit: int = 24,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "include_meta": str(bool(include_meta)).lower(),
+            "sort_by": sort_by,
+            "sort_order": sort_order,
+            "limit": limit,
+            "offset": offset,
+        }
+        if song_query:
+            params["song_query"] = song_query
+        if difficulty:
+            params["difficulty"] = difficulty
+        if live_type:
+            params["live_type"] = live_type
+        if from_date:
+            params["from_date"] = from_date
+        if to_date:
+            params["to_date"] = to_date
+
+        response = self._client.get(f"/api/users/{user_id}/screenshots", params=params)
         response.raise_for_status()
         return response.json()
 

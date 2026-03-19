@@ -1,0 +1,532 @@
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import FileResponse
+
+from bangstats_server.api.dependencies import assert_user_scope, get_current_user
+from bangstats_server.api.schemas.scans import ScanJobResponse, UploadUsageResponse
+from bangstats_server.api.schemas.sync import CountsResponse, SyncJobResponse
+from bangstats_server.api.schemas.webui import (
+    DashboardResponse,
+    ExportScreenshotReference,
+    MetaSongConfigResponse,
+    ScreenshotItemResponse,
+    ScreenshotListResponse,
+    UserDataExportResponse,
+    UserDataImportRequest,
+    UserDataImportResponse,
+    UploadFileItemResponse,
+    UploadFileListResponse,
+)
+from bangstats_server.core.config import BANGSTATS_ENV, DB_PATH
+from bangstats_server.core.config import META_SONG_IDS
+from bangstats_server.core.db.models.user import User
+from bangstats_server.core.services.event import EventService
+from bangstats_server.core.services.scan import ScanService
+from bangstats_server.core.services.scan_job import ScanJobService
+from bangstats_server.core.services.screenshot import ScreenshotService
+from bangstats_server.core.services.song import SongService
+from bangstats_server.core.services.sync_job import SyncJobService
+from bangstats_server.core.services.upload_storage import UploadStorageService
+from bangstats_server.core.services.user import UserService
+from bangstats_server.core.sync import get_db_counts
+from bangstats_server.core.services.stats import compute_general_summary, filter_excluded_songs, filter_stats_plays
+
+router = APIRouter()
+
+
+def _song_name_map(server: str) -> dict[int, str]:
+    names: dict[int, str] = {}
+    for song in SongService().get_all_songs():
+        if isinstance(song.name, dict):
+            names[int(song.internal_song_id)] = (
+                song.name.get(server)
+                or song.name.get("en")
+                or next((value for value in song.name.values() if value), "")
+                or f"Song {song.internal_song_id}"
+            )
+        else:
+            names[int(song.internal_song_id)] = f"Song {song.internal_song_id}"
+    return names
+
+
+def _resolve_screenshot_image_path(user_id: int, filename: str | None, scan_service: ScanService) -> Path | None:
+    if not filename:
+        return None
+    storage_path = UploadStorageService().resolve_user_file(user_id, filename)
+    if storage_path:
+        return storage_path
+    success_path = scan_service.find_success_image_path(filename)
+    if success_path:
+        return success_path
+    return None
+
+
+def _screenshot_item(
+    screenshot,
+    *,
+    user_id: int,
+    song_names: dict[int, str],
+    scan_service: ScanService,
+) -> ScreenshotItemResponse:
+    image_path = _resolve_screenshot_image_path(user_id, getattr(screenshot, "filename", None), scan_service)
+    image_url = None
+    if image_path is not None:
+        image_url = f"/api/users/{user_id}/screenshots/{int(screenshot.id)}/image"
+    perfect = int(getattr(screenshot, "perfect", 0) or 0)
+    great = int(getattr(screenshot, "great", 0) or 0)
+    good = int(getattr(screenshot, "good", 0) or 0)
+    bad = int(getattr(screenshot, "bad", 0) or 0)
+    miss = int(getattr(screenshot, "miss", 0) or 0)
+    total_notes = perfect + great + good + bad + miss
+    accuracy = round((perfect / total_notes) * 100, 2) if total_notes > 0 else 0.0
+
+    return ScreenshotItemResponse(
+        id=int(screenshot.id or 0),
+        filename=screenshot.filename,
+        song_id=int(screenshot.song_id),
+        song_name=song_names.get(int(screenshot.song_id)),
+        difficulty=screenshot.difficulty,
+        live_type=screenshot.live_type,
+        score=int(screenshot.score),
+        accuracy=accuracy,
+        full_combo=bool(screenshot.full_combo),
+        all_perfect=bool(screenshot.all_perfect),
+        anomaly=bool(screenshot.anomaly),
+        timestamp=screenshot.timestamp,
+        image_available=image_path is not None,
+        image_url=image_url,
+    )
+
+
+def _screenshot_sort_key(
+    screenshot,
+    *,
+    sort_by: str,
+    song_names: dict[int, str],
+):
+    if sort_by == "score":
+        return int(getattr(screenshot, "score", 0) or 0)
+    if sort_by == "accuracy":
+        perfect = int(getattr(screenshot, "perfect", 0) or 0)
+        great = int(getattr(screenshot, "great", 0) or 0)
+        good = int(getattr(screenshot, "good", 0) or 0)
+        bad = int(getattr(screenshot, "bad", 0) or 0)
+        miss = int(getattr(screenshot, "miss", 0) or 0)
+        total_notes = perfect + great + good + bad + miss
+        return (perfect / total_notes) if total_notes > 0 else 0.0
+    if sort_by == "song_name":
+        return song_names.get(int(getattr(screenshot, "song_id", 0) or 0), "")
+    return getattr(screenshot, "timestamp", datetime.min)
+
+
+def _sync_job_response(job) -> SyncJobResponse:
+    return SyncJobResponse(
+        id=int(job.id or 0),
+        server=job.server,
+        status=job.status,
+        requested_by_user_id=job.requested_by_user_id,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        songs=job.songs,
+        events=job.events,
+        bands=job.bands,
+        error_message=job.error_message,
+    )
+
+
+def _scan_job_response(job) -> ScanJobResponse:
+    payload = jsonable_encoder(job)
+    return ScanJobResponse(**payload)
+
+
+def _meta_song_config_for_user(user: User) -> MetaSongConfigResponse:
+    user_excluded = sorted({int(song_id) for song_id in (getattr(user, "excluded_song_ids", None) or []) if int(song_id) > 0})
+    server_defaults = sorted({int(song_id) for song_id in META_SONG_IDS if int(song_id) > 0})
+    return MetaSongConfigResponse(
+        server_meta_song_ids=server_defaults,
+        user_excluded_song_ids=user_excluded,
+        effective_song_ids=sorted(set(server_defaults) | set(user_excluded)),
+    )
+
+
+def _apply_screenshot_filters(
+    screenshots,
+    *,
+    current_user: User,
+    song_names: dict[int, str],
+    difficulty: str | None = None,
+    live_type: str | None = None,
+    song_query: str | None = None,
+    include_meta: bool = False,
+    from_date: str | None = None,
+    to_date: str | None = None,
+):
+    filtered = list(screenshots)
+    if not include_meta:
+        config = _meta_song_config_for_user(current_user)
+        filtered = filter_excluded_songs(filtered, excluded_song_ids=set(config.effective_song_ids))
+    filtered = filter_stats_plays(filtered, difficulty=difficulty, live_type=live_type)
+    if song_query:
+        lowered_query = song_query.strip().lower()
+        if lowered_query:
+            filtered = [
+                screenshot
+                for screenshot in filtered
+                if lowered_query in song_names.get(int(getattr(screenshot, "song_id", 0) or 0), "").lower()
+            ]
+    if from_date or to_date:
+        if not from_date or not to_date:
+            raise HTTPException(status_code=400, detail="Both from_date and to_date are required")
+        start = datetime.strptime(from_date, "%Y-%m-%d").date()
+        end = datetime.strptime(to_date, "%Y-%m-%d").date()
+        filtered = [
+            screenshot
+            for screenshot in filtered
+            if isinstance(getattr(screenshot, "timestamp", None), datetime)
+            and start <= screenshot.timestamp.date() <= end
+        ]
+    return filtered
+
+
+def _encoded_user_payload(user: User) -> dict:
+    payload = jsonable_encoder(user)
+    if payload.get("excluded_song_ids") is None:
+        payload["excluded_song_ids"] = []
+    return payload
+
+
+@router.get("/users/{user_id}/dashboard", response_model=DashboardResponse)
+def get_dashboard(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    user = UserService().get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    song_names = _song_name_map(user.server)
+    screenshot_service = ScreenshotService()
+    scan_service = ScanService()
+    screenshots = screenshot_service.get_screenshots_by_user(user_id)
+    recent_screenshots = sorted(
+        screenshots,
+        key=lambda item: item.timestamp,
+        reverse=True,
+    )[:8]
+
+    counts = get_db_counts()
+    current_event = EventService().get_current_event(language=user.server)
+    upload_usage = UploadStorageService().get_usage(user_id)
+    scan_jobs = ScanJobService().list_jobs_for_user(user_id=user_id, limit=8, status=None)
+    sync_jobs = SyncJobService().list_jobs(limit=8, status=None)
+
+    stats_payload = None
+    if screenshots:
+        stats_payload = compute_general_summary(screenshots)
+    legacy_db_path = DB_PATH.parent.parent / "_bangstats.db"
+    runtime = {
+        "db_path": str(DB_PATH),
+        "env": BANGSTATS_ENV,
+        "legacy_db_path": str(legacy_db_path),
+        "legacy_db_exists": legacy_db_path.exists(),
+        "server": user.server,
+    }
+    current_event_status = (
+        f"Current event resolved for server {user.server}."
+        if current_event is not None
+        else f"No event found for server {user.server} at current UTC time using {DB_PATH}."
+    )
+
+    return DashboardResponse(
+        user=_encoded_user_payload(user),
+        counts=CountsResponse(songs=counts[0], events=counts[1], bands=counts[2]),
+        current_event=jsonable_encoder(current_event) if current_event is not None else None,
+        current_event_status=current_event_status,
+        runtime=runtime,
+        upload_usage=UploadUsageResponse(
+            file_count=int(upload_usage["file_count"]),
+            total_size_mb=float(upload_usage["total_size_mb"]),
+            oldest_file_age_days=float(upload_usage["oldest_file_age_days"]),
+        ),
+        stats=stats_payload,
+        scan_jobs=[_scan_job_response(job) for job in scan_jobs],
+        sync_jobs=[_sync_job_response(job) for job in sync_jobs if job.requested_by_user_id in {None, user_id}],
+        scan_errors=scan_service.list_error_files(),
+        recent_screenshots=[
+            _screenshot_item(
+                screenshot,
+                user_id=user_id,
+                song_names=song_names,
+                scan_service=scan_service,
+            )
+            for screenshot in recent_screenshots
+        ],
+    )
+
+
+@router.get("/users/{user_id}/screenshots", response_model=ScreenshotListResponse)
+def list_screenshots(
+    user_id: int,
+    limit: int = Query(60, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    song_id: int | None = Query(None, ge=1),
+    song_query: str | None = Query(None),
+    sort_by: str = Query("timestamp", pattern="^(timestamp|song_name|score|accuracy)$"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    difficulty: str | None = Query(None),
+    live_type: str | None = Query(None),
+    include_meta: bool = Query(False),
+    from_date: str | None = Query(None),
+    to_date: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    screenshot_service = ScreenshotService()
+    song_names = _song_name_map(current_user.server)
+    scan_service = ScanService()
+
+    if song_id is not None:
+        screenshots = screenshot_service.get_screenshots_by_song(
+            user_id,
+            song_id,
+            difficulty.strip().lower() if difficulty else None,
+        )
+    else:
+        screenshots = screenshot_service.get_screenshots_by_user(user_id)
+    screenshots = _apply_screenshot_filters(
+        screenshots,
+        current_user=current_user,
+        song_names=song_names,
+        difficulty=difficulty,
+        live_type=live_type,
+        song_query=song_query,
+        include_meta=include_meta,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+    ordered = sorted(
+        screenshots,
+        key=lambda item: _screenshot_sort_key(item, sort_by=sort_by, song_names=song_names),
+        reverse=sort_order == "desc",
+    )
+    page = ordered[offset : offset + limit]
+    return ScreenshotListResponse(
+        total=len(ordered),
+        limit=limit,
+        offset=offset,
+        items=[
+            _screenshot_item(
+                screenshot,
+                user_id=user_id,
+                song_names=song_names,
+                scan_service=scan_service,
+            )
+            for screenshot in page
+        ],
+    )
+
+
+@router.get("/users/{user_id}/screenshots/{screenshot_id}/image")
+def get_screenshot_image(
+    user_id: int,
+    screenshot_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    screenshot = ScreenshotService().get_screenshot_by_id(screenshot_id)
+    if not screenshot or int(screenshot.user_id) != user_id:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+
+    path = _resolve_screenshot_image_path(user_id, screenshot.filename, ScanService())
+    if path is None:
+        raise HTTPException(status_code=404, detail="Screenshot image not found")
+    return FileResponse(path)
+
+
+@router.get("/users/{user_id}/uploads", response_model=UploadFileListResponse)
+def list_uploaded_files(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    storage = UploadStorageService()
+    files = storage.list_user_files(user_id)
+    items = []
+    for file_path in files:
+        stat = file_path.stat()
+        items.append(
+            UploadFileItemResponse(
+                filename=file_path.name,
+                size_bytes=int(stat.st_size),
+                modified_at=datetime.fromtimestamp(stat.st_mtime),
+                image_url=f"/api/users/{user_id}/uploads/{file_path.name}",
+            )
+        )
+    return UploadFileListResponse(total=len(items), items=items)
+
+
+@router.get("/users/{user_id}/uploads/{filename}")
+def get_uploaded_file(
+    user_id: int,
+    filename: str,
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    path = UploadStorageService().resolve_user_file(user_id, filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
+    return FileResponse(path)
+
+
+@router.get("/users/{user_id}/meta-song-config", response_model=MetaSongConfigResponse)
+def get_meta_song_config(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    user = UserService().get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return _meta_song_config_for_user(user)
+
+
+@router.get("/users/{user_id}/export", response_model=UserDataExportResponse)
+def export_user_data(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    user = UserService().get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    screenshot_service = ScreenshotService()
+    scan_service = ScanService()
+    storage = UploadStorageService()
+    screenshots = screenshot_service.get_screenshots_by_user(user_id)
+    encoded_screenshots = [jsonable_encoder(item) for item in screenshots]
+
+    references: list[ExportScreenshotReference] = []
+    for screenshot in screenshots:
+        filename = getattr(screenshot, "filename", None)
+        image_path = _resolve_screenshot_image_path(user_id, filename, scan_service)
+        direct_path = storage.resolve_user_file(user_id, filename) if filename else None
+        references.append(
+            ExportScreenshotReference(
+                filename=filename,
+                path=str(direct_path) if direct_path is not None else (str(image_path) if image_path is not None else None),
+                image_available=image_path is not None,
+            )
+        )
+
+    user_payload = _encoded_user_payload(user)
+    user_payload.pop("password_hash", None)
+
+    return UserDataExportResponse(
+        exported_at=datetime.now(timezone.utc),
+        user=user_payload,
+        screenshots=encoded_screenshots,
+        screenshot_references=references,
+        meta_song_config=_meta_song_config_for_user(user),
+        stats_summary=compute_general_summary(screenshots),
+    )
+
+
+@router.post("/users/{user_id}/import", response_model=UserDataImportResponse)
+def import_user_data(
+    user_id: int,
+    data: UserDataImportRequest,
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    user_service = UserService()
+    screenshot_service = ScreenshotService()
+    storage = UploadStorageService()
+
+    user = user_service.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    payload = data.payload or {}
+    restored = 0
+    skipped = 0
+    unresolved: list[str] = []
+    updated_fields: list[str] = []
+
+    imported_user = payload.get("user")
+    if isinstance(imported_user, dict):
+        user_updates = {}
+        for field in ["screenshots_source", "screenshots_path", "sync_command", "excluded_song_ids"]:
+            if field in imported_user:
+                user_updates[field] = imported_user[field]
+        if user_updates:
+            user_service.update_user(user_id, user_updates)
+            updated_fields = sorted(user_updates.keys())
+
+    seen_existing = set(
+        screenshot_service.get_existing_filenames_for_user(
+            user_id,
+            [item.get("filename") for item in payload.get("screenshots", []) if isinstance(item, dict) and item.get("filename")],
+        )
+    )
+
+    for raw in payload.get("screenshots", []):
+        if not isinstance(raw, dict):
+            skipped += 1
+            continue
+        screenshot_data = dict(raw)
+        screenshot_data["user_id"] = user_id
+        filename = screenshot_data.get("filename")
+        if filename and filename in seen_existing:
+            skipped += 1
+            continue
+        timestamp = screenshot_data.get("timestamp")
+        if isinstance(timestamp, str):
+            try:
+                screenshot_data["timestamp"] = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            except ValueError:
+                screenshot_data.pop("timestamp", None)
+        screenshot_data.pop("id", None)
+        try:
+            created = screenshot_service.create_screenshot(screenshot_data)
+        except ValueError:
+            skipped += 1
+            continue
+        if created is None:
+            skipped += 1
+            continue
+        restored += 1
+
+    for raw in payload.get("screenshot_references", []):
+        if not isinstance(raw, dict):
+            continue
+        filename = raw.get("filename")
+        if not filename:
+            continue
+        if storage.resolve_user_file(user_id, filename) is None:
+            unresolved.append(str(filename))
+
+    return UserDataImportResponse(
+        restored_screenshots=restored,
+        skipped_screenshots=skipped,
+        unresolved_screenshot_references=sorted(set(unresolved)),
+        updated_user_settings=updated_fields,
+    )
+
+
+@router.get("/scans/errors/{error_type}/{json_filename}/image")
+def get_scan_error_image(
+    error_type: str,
+    json_filename: str,
+    _: User = Depends(get_current_user),
+):
+    path = ScanService()._find_error_image_path(error_type, json_filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Error image not found")
+    return FileResponse(path)

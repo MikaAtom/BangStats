@@ -51,6 +51,7 @@ def compute_general_summary(screenshots: List[Any]) -> Dict[str, Any]:
         "total_fc": total_fc,
         "total_ap": total_ap,
         "accuracy": accuracy,
+        "skill_score": compute_skill_score(screenshots),
     }
 
 
@@ -62,6 +63,44 @@ def compute_top_songs(screenshots: List[Any], n: int = 5) -> List[Dict[str, Any]
             grouped[sid] += 1
     ordered = sorted(grouped.items(), key=lambda x: x[1], reverse=True)[:n]
     return [{"song_id": sid, "play_count": count} for sid, count in ordered]
+
+
+def compute_song_rankings(
+    screenshots: List[Any],
+    *,
+    song_names: Dict[int, str] | None = None,
+    sort_by: str = "play_count",
+    limit: int = 25,
+) -> List[Dict[str, Any]]:
+    grouped: Dict[int, List[Any]] = defaultdict(list)
+    for play in screenshots:
+        song_id = int(getattr(play, "song_id", 0))
+        if song_id > 0:
+            grouped[song_id].append(play)
+
+    rows: List[Dict[str, Any]] = []
+    for song_id, plays in grouped.items():
+        ordered = sorted(plays, key=lambda item: getattr(item, "timestamp", datetime.min))
+        rows.append(
+            {
+                "song_id": song_id,
+                "song_name": (song_names or {}).get(song_id),
+                "play_count": len(ordered),
+                "fc_count": sum(1 for play in ordered if bool(getattr(play, "full_combo", False))),
+                "ap_count": sum(1 for play in ordered if bool(getattr(play, "all_perfect", False))),
+                "skill_score": compute_skill_score(ordered),
+                "latest_play": _to_play_meta(ordered[-1]) if ordered else None,
+            }
+        )
+
+    sort_key_map = {
+        "play_count": lambda item: (int(item["play_count"]), float(item["skill_score"])),
+        "skill_score": lambda item: (float(item["skill_score"]), int(item["play_count"])),
+        "fc_count": lambda item: (int(item["fc_count"]), int(item["play_count"])),
+        "ap_count": lambda item: (int(item["ap_count"]), int(item["play_count"])),
+    }
+    key_fn = sort_key_map.get(sort_by, sort_key_map["play_count"])
+    return sorted(rows, key=key_fn, reverse=True)[: max(1, int(limit))]
 
 
 def compute_recent_plays(screenshots: List[Any], n: int = 5) -> List[Dict[str, Any]]:
@@ -76,9 +115,73 @@ def compute_recent_plays(screenshots: List[Any], n: int = 5) -> List[Dict[str, A
             "difficulty": str(getattr(s, "difficulty", "")),
             "timestamp": getattr(s, "timestamp", None),
             "filename": getattr(s, "filename", None),
+            "live_type": str(getattr(s, "live_type", "")),
         }
         for s in ordered
     ]
+
+
+def compute_skill_score(screenshots: List[Any]) -> float:
+    if not screenshots:
+        return 0.0
+    total_notes = sum(_to_notes_total(play) for play in screenshots)
+    total_perfects = sum(int(getattr(play, "perfect", 0)) for play in screenshots)
+    accuracy = (total_perfects / total_notes) * 100 if total_notes > 0 else 0.0
+    fc_rate = sum(1 for play in screenshots if bool(getattr(play, "full_combo", False))) / len(screenshots)
+    ap_rate = sum(1 for play in screenshots if bool(getattr(play, "all_perfect", False))) / len(screenshots)
+    score = accuracy + (fc_rate * 8.0) + (ap_rate * 12.0)
+    return round(score, 2)
+
+
+def filter_excluded_songs(screenshots: List[Any], excluded_song_ids: set[int] | None = None) -> List[Any]:
+    if not excluded_song_ids:
+        return list(screenshots)
+    return [
+        play
+        for play in screenshots
+        if int(getattr(play, "song_id", 0)) not in excluded_song_ids
+    ]
+
+
+def filter_stats_plays(
+    screenshots: List[Any],
+    *,
+    difficulty: str | None = None,
+    live_type: str | None = None,
+) -> List[Any]:
+    normalized_difficulty = difficulty.strip().lower() if isinstance(difficulty, str) and difficulty.strip() else None
+    normalized_live_type = live_type.strip().lower() if isinstance(live_type, str) and live_type.strip() else None
+    filtered = list(screenshots)
+    if normalized_difficulty:
+        filtered = [
+            play
+            for play in filtered
+            if str(getattr(play, "difficulty", "")).strip().lower() == normalized_difficulty
+        ]
+    if normalized_live_type:
+        filtered = [
+            play
+            for play in filtered
+            if str(getattr(play, "live_type", "")).strip().lower() == normalized_live_type
+        ]
+    return filtered
+
+
+def compute_live_type_distribution(screenshots: List[Any]) -> Dict[str, int]:
+    counts: Dict[str, int] = defaultdict(int)
+    for play in screenshots:
+        live_type = str(getattr(play, "live_type", "")).strip().lower() or "unknown"
+        counts[live_type] += 1
+    return dict(sorted(counts.items(), key=lambda item: item[0]))
+
+
+def compute_active_hours(screenshots: List[Any]) -> Dict[str, int]:
+    counts: Dict[str, int] = defaultdict(int)
+    for play in screenshots:
+        timestamp = getattr(play, "timestamp", None)
+        if isinstance(timestamp, datetime):
+            counts[str(int(timestamp.hour))] += 1
+    return dict(sorted(counts.items(), key=lambda item: item[0]))
 
 
 def compute_song_difficulty_overview(
@@ -176,6 +279,7 @@ def compute_difficulty_detail(
             [int(item.get("plays", 0)) for item in practice_sessions],
             default=0,
         ),
+        "skill_score": compute_skill_score(ordered),
     }
 
 
@@ -629,49 +733,6 @@ def compute_insights(
     )
 
     sparse_data = total_plays < max(1, int(min_recommended_plays))
-    recommendations: List[Dict[str, Any]] = []
-    if sparse_data:
-        recommendations.append(
-            {
-                "title": "Need more sample size",
-                "detail": (
-                    f"Insights are limited with {total_plays} plays in range; "
-                    f"aim for at least {min_recommended_plays}."
-                ),
-            }
-        )
-    if float(repetition.get("repeated_ratio", 0.0)) >= 0.45 and repetition.get("most_looped_songs"):
-        most_looped = repetition["most_looped_songs"][0]
-        recommendations.append(
-            {
-                "title": "High repetition detected",
-                "detail": (
-                    f"About {round(float(repetition['repeated_ratio']) * 100, 1)}% of plays are repeats. "
-                    "Consider rotating songs to broaden consistency."
-                ),
-                "song_id": most_looped.get("song_id"),
-            }
-        )
-    if practice_periods:
-        top_practice = practice_periods[0]
-        recommendations.append(
-            {
-                "title": "Focused practice pattern",
-                "detail": (
-                    f"Song {top_practice.get('song_id')} shows "
-                    f"{top_practice.get('burst_count', 0)} dense practice periods."
-                ),
-                "song_id": top_practice.get("song_id"),
-            }
-        )
-    if total_sessions >= 3 and avg_plays_per_session <= 2.5:
-        recommendations.append(
-            {
-                "title": "Many short sessions",
-                "detail": "Your recent sessions are short; try one longer focused block for progression-heavy songs.",
-            }
-        )
-
     return {
         "from_date": from_date.isoformat(),
         "to_date": to_date.isoformat(),
@@ -702,5 +763,321 @@ def compute_insights(
         )[:5],
         "practice_periods": practice_periods,
         "repetition": repetition,
-        "recommendations": recommendations[:5],
+        "recommendations": [],
+    }
+
+
+def _date_range_label(scope: str, *, from_date: date, to_date: date) -> str:
+    if scope == "weekly":
+        return f"Week of {from_date.isoformat()}"
+    if scope == "monthly":
+        return from_date.strftime("%B %Y")
+    if scope == "seasonal":
+        return f"Season {from_date.isoformat()} to {to_date.isoformat()}"
+    if scope == "yearly":
+        return str(from_date.year)
+    if scope == "event":
+        return f"Event {from_date.isoformat()} to {to_date.isoformat()}"
+    return f"{from_date.isoformat()} to {to_date.isoformat()}"
+
+
+def build_period_windows(
+    *,
+    scope: str,
+    anchor: date,
+    count: int,
+) -> List[tuple[str, date, date]]:
+    windows: List[tuple[str, date, date]] = []
+    safe_count = max(1, int(count))
+    if scope == "weekly":
+        current = anchor - timedelta(days=anchor.weekday())
+        for _ in range(safe_count):
+            start = current
+            end = current + timedelta(days=6)
+            windows.append((f"{start.isoformat()}", start, end))
+            current = start - timedelta(days=7)
+    elif scope == "monthly":
+        year = anchor.year
+        month = anchor.month
+        for _ in range(safe_count):
+            start = date(year, month, 1)
+            if month == 12:
+                next_month = date(year + 1, 1, 1)
+            else:
+                next_month = date(year, month + 1, 1)
+            end = next_month - timedelta(days=1)
+            windows.append((start.strftime("%Y-%m"), start, end))
+            month -= 1
+            if month == 0:
+                month = 12
+                year -= 1
+    elif scope == "yearly":
+        year = anchor.year
+        for _ in range(safe_count):
+            start = date(year, 1, 1)
+            end = date(year, 12, 31)
+            windows.append((str(year), start, end))
+            year -= 1
+    else:
+        windows.append((_date_range_label(scope, from_date=anchor, to_date=anchor), anchor, anchor))
+    windows.reverse()
+    return windows
+
+
+def compute_progression(
+    screenshots: List[Any],
+    *,
+    scope: str,
+    anchor: date,
+    count: int = 6,
+) -> Dict[str, Any]:
+    points: List[Dict[str, Any]] = []
+    for label, from_date, to_date in build_period_windows(scope=scope, anchor=anchor, count=count):
+        plays = _filter_plays_in_date_range(screenshots, from_date=from_date, to_date=to_date)
+        summary = compute_general_summary(plays)
+        points.append(
+            {
+                "label": label,
+                "from_date": from_date.isoformat(),
+                "to_date": to_date.isoformat(),
+                "plays": int(summary.get("total_plays", 0)),
+                "accuracy": float(summary.get("accuracy", 0.0)),
+                "skill_score": float(summary.get("skill_score", 0.0)),
+                "fc": int(summary.get("total_fc", 0)),
+                "ap": int(summary.get("total_ap", 0)),
+            }
+        )
+    delta_skill = 0.0
+    delta_accuracy = 0.0
+    if len(points) >= 2:
+        delta_skill = round(float(points[-1]["skill_score"]) - float(points[-2]["skill_score"]), 2)
+        delta_accuracy = round(float(points[-1]["accuracy"]) - float(points[-2]["accuracy"]), 2)
+    return {
+        "scope": scope,
+        "points": points,
+        "delta_skill_score": delta_skill,
+        "delta_accuracy": delta_accuracy,
+    }
+
+
+def compute_event_stats(
+    screenshots: List[Any],
+    *,
+    song_names: Optional[Dict[int, str]] = None,
+    event_name: Optional[str] = None,
+    event_type: Optional[str] = None,
+    event_id: int = 0,
+    from_date: date,
+    to_date: date,
+    session_gap_minutes: int = 45,
+) -> Dict[str, Any]:
+    plays = _filter_plays_in_date_range(screenshots, from_date=from_date, to_date=to_date)
+    summary = compute_general_summary(plays)
+    sessions = _sessionize_plays(plays, session_gap_minutes=session_gap_minutes)
+    by_song: Dict[int, Dict[str, Any]] = defaultdict(lambda: {"play_count": 0, "fc_count": 0, "ap_count": 0, "plays": []})
+    for play in plays:
+        song_id = int(getattr(play, "song_id", 0))
+        if song_id <= 0:
+            continue
+        by_song[song_id]["play_count"] += 1
+        by_song[song_id]["fc_count"] += 1 if bool(getattr(play, "full_combo", False)) else 0
+        by_song[song_id]["ap_count"] += 1 if bool(getattr(play, "all_perfect", False)) else 0
+        by_song[song_id]["plays"].append(play)
+    top_songs = sorted(
+        [
+            {
+                "song_id": song_id,
+                "song_name": (song_names or {}).get(song_id),
+                "play_count": payload["play_count"],
+                "fc_count": payload["fc_count"],
+                "ap_count": payload["ap_count"],
+                "skill_score": compute_skill_score(payload["plays"]),
+            }
+            for song_id, payload in by_song.items()
+        ],
+        key=lambda item: (int(item["play_count"]), float(item["skill_score"])),
+        reverse=True,
+    )[:8]
+    return {
+        "event_id": int(event_id),
+        "event_name": event_name,
+        "event_type": event_type,
+        "from_date": from_date.isoformat(),
+        "to_date": to_date.isoformat(),
+        "summary": summary,
+        "live_types": compute_live_type_distribution(plays),
+        "active_hours": compute_active_hours(plays),
+        "top_songs": top_songs,
+        "total_sessions": len(sessions),
+        "longest_session_minutes": max([_to_session_item(session)["duration_minutes"] for session in sessions], default=0),
+        "fc_gains": int(summary.get("total_fc", 0)),
+        "ap_gains": int(summary.get("total_ap", 0)),
+        "skill_score": float(summary.get("skill_score", 0.0)),
+    }
+
+
+def compute_song_journey(
+    plays: List[Any],
+    *,
+    song_id: int,
+    song_name: Optional[str],
+    difficulty: str,
+    song_length_seconds: int = 0,
+    session_gap_minutes: int = 45,
+) -> Dict[str, Any]:
+    detail = compute_difficulty_detail(
+        plays,
+        song_length_seconds=song_length_seconds,
+        session_gap_minutes=session_gap_minutes,
+    )
+    ordered = sorted(plays, key=lambda play: getattr(play, "timestamp", datetime.min))
+    practice_periods = _compute_practice_periods(
+        ordered,
+        song_lengths_seconds={song_id: song_length_seconds},
+        min_burst_plays=2,
+    )
+    timeline: List[Dict[str, Any]] = []
+    for key, label in [
+        ("first_played", "First play"),
+        ("first_fc", "First Full Combo"),
+        ("first_ap", "First All Perfect"),
+        ("last_played", "Latest play"),
+    ]:
+        meta = detail.get(key)
+        if meta:
+            timeline.append(
+                {
+                    "type": key,
+                    "label": label,
+                    "timestamp": meta.get("timestamp"),
+                    "filename": meta.get("filename"),
+                    "details": {},
+                }
+            )
+    for period in practice_periods[:6]:
+        timeline.append(
+            {
+                "type": "practice_period",
+                "label": f"Practice burst ({period.get('max_burst_plays', 0)} plays)",
+                "timestamp": period.get("latest_burst_at"),
+                "filename": None,
+                "details": period,
+            }
+        )
+    timeline = sorted(timeline, key=lambda item: item.get("timestamp") or datetime.min)
+    return {
+        "song_id": song_id,
+        "song_name": song_name,
+        "difficulty": difficulty,
+        "total_plays": len(ordered),
+        "first_played": detail.get("first_played"),
+        "first_fc": detail.get("first_fc"),
+        "first_ap": detail.get("first_ap"),
+        "plays_before_fc": detail.get("plays_before_fc"),
+        "plays_before_ap": detail.get("plays_before_ap"),
+        "skill_score": detail.get("skill_score", 0.0),
+        "practice_periods": practice_periods,
+        "timeline": timeline,
+    }
+
+
+def compute_recap(
+    screenshots: List[Any],
+    *,
+    scope: str,
+    from_date: date,
+    to_date: date,
+    song_names: Optional[Dict[int, str]] = None,
+    compare_screenshots: Optional[List[Any]] = None,
+    event_id: Optional[int] = None,
+    event_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    plays = _filter_plays_in_date_range(screenshots, from_date=from_date, to_date=to_date)
+    summary = compute_general_summary(plays)
+    compare_summary = compute_general_summary(compare_screenshots or [])
+    top_song_rows: List[Dict[str, Any]] = []
+    by_song: Dict[int, List[Any]] = defaultdict(list)
+    for play in plays:
+        song_id = int(getattr(play, "song_id", 0))
+        if song_id > 0:
+            by_song[song_id].append(play)
+    for song_id, song_plays in by_song.items():
+        ordered = sorted(song_plays, key=lambda play: getattr(play, "timestamp", datetime.min))
+        top_song_rows.append(
+            {
+                "song_id": song_id,
+                "song_name": (song_names or {}).get(song_id),
+                "play_count": len(song_plays),
+                "fc_count": sum(1 for play in song_plays if bool(getattr(play, "full_combo", False))),
+                "ap_count": sum(1 for play in song_plays if bool(getattr(play, "all_perfect", False))),
+                "skill_score": compute_skill_score(song_plays),
+                "latest_play": _to_play_meta(ordered[-1]),
+            }
+        )
+    top_song_rows = sorted(top_song_rows, key=lambda item: (int(item["play_count"]), float(item["skill_score"])), reverse=True)
+    current_song_ids = set(by_song.keys())
+    prior_song_ids = {
+        int(getattr(play, "song_id", 0))
+        for play in (compare_screenshots or [])
+        if int(getattr(play, "song_id", 0)) > 0
+    }
+    new_song_rows = [row for row in top_song_rows if row["song_id"] not in prior_song_ids][:8]
+    most_practiced = sorted(top_song_rows, key=lambda item: (int(item["fc_count"]) + int(item["ap_count"]), int(item["play_count"])), reverse=True)[:8]
+    sessions = _sessionize_plays(plays, session_gap_minutes=45)
+    milestones = compute_milestones(plays)
+    highlights: List[Dict[str, Any]] = []
+    if top_song_rows:
+        highlights.append(
+            {
+                "title": "Most played song",
+                "value": top_song_rows[0]["song_name"] or f"Song {top_song_rows[0]['song_id']}",
+                "detail": f"{top_song_rows[0]['play_count']} plays in this {scope}.",
+                "screenshot": top_song_rows[0].get("latest_play"),
+            }
+        )
+    if summary.get("total_fc", 0):
+        top_fc = next((row for row in top_song_rows if int(row.get("fc_count", 0)) > 0), None)
+        highlights.append(
+            {
+                "title": "Full Combo push",
+                "value": str(summary["total_fc"]),
+                "detail": "Full Combo clears recorded in this range.",
+                "screenshot": top_fc.get("latest_play") if top_fc else None,
+            }
+        )
+    if summary.get("total_ap", 0):
+        top_ap = next((row for row in top_song_rows if int(row.get("ap_count", 0)) > 0), None)
+        highlights.append(
+            {
+                "title": "All Perfect streak",
+                "value": str(summary["total_ap"]),
+                "detail": "All Perfect clears recorded in this range.",
+                "screenshot": top_ap.get("latest_play") if top_ap else None,
+            }
+        )
+    return {
+        "scope": scope,
+        "title": _date_range_label(scope, from_date=from_date, to_date=to_date),
+        "from_date": from_date.isoformat(),
+        "to_date": to_date.isoformat(),
+        "event_id": event_id,
+        "event_name": event_name,
+        "summary": summary,
+        "skill_score": float(summary.get("skill_score", 0.0)),
+        "skill_score_delta": round(float(summary.get("skill_score", 0.0)) - float(compare_summary.get("skill_score", 0.0)), 2),
+        "top_songs": top_song_rows[:8],
+        "new_songs": new_song_rows,
+        "most_practiced": most_practiced,
+        "live_types": compute_live_type_distribution(plays),
+        "active_hours": compute_active_hours(plays),
+        "highlights": highlights,
+        "streaks": {
+            "best_daily": milestones.get("best_streak_days", 0),
+            "current_daily": milestones.get("current_streak_days", 0),
+            "longest_session_plays": max([_to_session_item(session)["plays"] for session in sessions], default=0),
+        },
+        "sessions": {
+            "total_sessions": len(sessions),
+            "longest_session_minutes": max([_to_session_item(session)["duration_minutes"] for session in sessions], default=0),
+        },
     }

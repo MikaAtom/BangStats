@@ -3,6 +3,7 @@
 Self-hosted Bang Dream stats stack with:
 - FastAPI server (`bangstats_server`)
 - CLI client (`bangstats_cli`)
+- React web UI (`clients/webui`)
 
 Ukrainian README: [README_uk.md](README_uk.md)
 
@@ -27,6 +28,11 @@ Start server:
 
 Start CLI client (in another terminal):
 - `uv run bangstats client`
+
+Start web UI (in another terminal):
+- `cd clients/webui`
+- `npm install`
+- `npm run dev`
 
 You can also run the legacy direct client script:
 - `uv run bangstats-client`
@@ -74,6 +80,7 @@ server/
 clients/
   cli/
     bangstats_cli/         # CLI client + API client + cache + dispatcher
+  webui/                  # React SPA for browser-based workflows
 
 tests/                     # test suite
 ```

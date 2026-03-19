@@ -8,6 +8,7 @@ from bangstats_server.api.routers import auth as auth_router
 from bangstats_server.app import app
 from bangstats_server.core.db.repositories.token_repository import TokenRepository
 from bangstats_server.core.services.auth import AuthService, LoginRateLimiter
+from bangstats_server.core.services.user import UserService
 
 
 @pytest.fixture(autouse=True)
@@ -96,6 +97,74 @@ def test_login_happy_path_and_invalid_credentials(client: TestClient):
     )
     assert nonexistent_response.status_code == 401
     assert nonexistent_response.json()["detail"] == "Invalid username or password"
+
+
+def test_legacy_user_can_set_password_and_then_login(client: TestClient):
+    suffix = uuid4().hex[:8]
+    username = f"legacy_{suffix}"
+    game_id = f"gid_{suffix}"
+
+    created = UserService().create_user(
+        {
+            "username": username,
+            "game_id": game_id,
+            "server": "en",
+        }
+    )
+    assert created.username == username
+
+    blocked_login = client.post(
+        "/api/auth/login",
+        json={"username": username, "password": "new-secret"},
+    )
+    assert blocked_login.status_code == 403
+    assert "password setup" in blocked_login.json()["detail"].lower()
+
+    setup_response = client.post(
+        "/api/auth/legacy-password-setup",
+        json={
+            "username": username,
+            "game_id": game_id,
+            "password": "new-secret",
+        },
+    )
+    assert setup_response.status_code == 200
+    assert setup_response.json()["user"]["username"] == username
+
+    login_response = client.post(
+        "/api/auth/login",
+        json={"username": username, "password": "new-secret"},
+    )
+    assert login_response.status_code == 200
+    assert login_response.json()["user"]["username"] == username
+
+
+def test_legacy_user_can_use_temporary_legacy_login(client: TestClient):
+    suffix = uuid4().hex[:8]
+    username = f"legacy_temp_{suffix}"
+    game_id = f"gid_{suffix}"
+
+    created = UserService().create_user(
+        {
+            "username": username,
+            "game_id": game_id,
+            "server": "en",
+        }
+    )
+    assert created.username == username
+
+    login_response = client.post(
+        "/api/auth/legacy-login",
+        json={"username": username, "game_id": game_id},
+    )
+    assert login_response.status_code == 200
+    assert login_response.json()["user"]["username"] == username
+
+    bad_response = client.post(
+        "/api/auth/legacy-login",
+        json={"username": username, "game_id": "wrong"},
+    )
+    assert bad_response.status_code == 401
 
 
 def test_logout_happy_path_and_already_logged_out_token(client: TestClient):

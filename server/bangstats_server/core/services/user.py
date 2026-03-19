@@ -31,6 +31,8 @@ class UserService(BaseCRUDService):
     def create_user(self, user_data: Dict[str, Any]) -> User:
         if user_data.get("screenshots_source") == "remote":
             user_data["screenshots_source"] = "local"
+        if "role" not in user_data:
+            user_data["role"] = "admin" if not self.get_all_users() else "user"
         required = ["game_id", "username", "server"]
         for f in required:
             if f not in user_data:
@@ -60,6 +62,18 @@ class UserService(BaseCRUDService):
         if "sync_command" in user_data and user_data["sync_command"] is not None:
             if not isinstance(user_data["sync_command"], str):
                 raise ValueError("sync_command must be a string or null")
+        if "excluded_song_ids" in user_data:
+            if user_data["excluded_song_ids"] is None:
+                user_data["excluded_song_ids"] = []
+            if not isinstance(user_data["excluded_song_ids"], list):
+                raise ValueError("excluded_song_ids must be a list of integers")
+            cleaned_ids: list[int] = []
+            for item in user_data["excluded_song_ids"]:
+                if not isinstance(item, int) or item <= 0:
+                    raise ValueError("excluded_song_ids must contain positive integers")
+                if item not in cleaned_ids:
+                    cleaned_ids.append(item)
+            user_data["excluded_song_ids"] = cleaned_ids
         if "server_folder_authorized" in user_data:
             if not isinstance(user_data["server_folder_authorized"], bool):
                 raise ValueError("server_folder_authorized must be a boolean")
@@ -69,6 +83,9 @@ class UserService(BaseCRUDService):
                 or not user_data["password_hash"].strip()
             ):
                 raise ValueError("password_hash must be a non-empty string")
+        if "role" in user_data:
+            if user_data["role"] not in {"user", "admin"}:
+                raise ValueError("role must be either 'user' or 'admin'")
         return self._create_or_raise(self._repo, user_data)
 
     def update_user(self, user_id: int, user_data: Dict[str, Any]) -> User:
@@ -103,6 +120,18 @@ class UserService(BaseCRUDService):
         if "sync_command" in user_data and user_data["sync_command"] is not None:
             if not isinstance(user_data["sync_command"], str):
                 raise ValueError("sync_command must be a string or null")
+        if "excluded_song_ids" in user_data:
+            if user_data["excluded_song_ids"] is None:
+                user_data["excluded_song_ids"] = []
+            if not isinstance(user_data["excluded_song_ids"], list):
+                raise ValueError("excluded_song_ids must be a list of integers")
+            cleaned_ids: list[int] = []
+            for item in user_data["excluded_song_ids"]:
+                if not isinstance(item, int) or item <= 0:
+                    raise ValueError("excluded_song_ids must contain positive integers")
+                if item not in cleaned_ids:
+                    cleaned_ids.append(item)
+            user_data["excluded_song_ids"] = cleaned_ids
         if "server_folder_authorized" in user_data:
             if not isinstance(user_data["server_folder_authorized"], bool):
                 raise ValueError("server_folder_authorized must be a boolean")
@@ -112,6 +141,8 @@ class UserService(BaseCRUDService):
                 or not user_data["password_hash"].strip()
             ):
                 raise ValueError("password_hash must be a non-empty string")
+        if "role" in user_data and user_data["role"] not in {"user", "admin"}:
+            raise ValueError("role must be either 'user' or 'admin'")
         return self._update_or_raise(self._repo, user_id, user_data)
 
     def delete_user(self, user_id: int) -> bool:

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from bangstats_server.api.dependencies import get_current_user
 from bangstats_server.api.schemas.admin import FlushRequest, FlushResponse
@@ -21,11 +21,22 @@ router = APIRouter()
 @router.get("/health")
 def health():
     mode = "dev" if BANGSTATS_ENV == "dev" else "production"
-    return {"status": "ok", "mode": mode}
+    legacy_db_path = DB_PATH.parent.parent / "_bangstats.db"
+    return {
+        "status": "ok",
+        "mode": mode,
+        "db_path": str(DB_PATH),
+        "env": BANGSTATS_ENV,
+        "legacy_db_path": str(legacy_db_path),
+        "legacy_db_exists": legacy_db_path.exists(),
+    }
 
 
 @router.post("/admin/flush", response_model=FlushResponse)
-def flush_targets(data: FlushRequest, _: User = Depends(get_current_user)):
+def flush_targets(data: FlushRequest, current_user: User = Depends(get_current_user)):
+    if getattr(current_user, "role", "user") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     requested_targets: list[tuple[Path, str]] = []
     if data.remote_cache:
         requested_targets.append((REMOTE_CACHE, "remote_data_cache"))

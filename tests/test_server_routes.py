@@ -35,6 +35,8 @@ def test_health_route():
         payload = response.json()
         assert payload["status"] == "ok"
         assert payload["mode"] in {"production", "dev"}
+        assert payload["db_path"].endswith("bangstats.db")
+        assert "legacy_db_exists" in payload
 
 
 def test_user_crud_routes():
@@ -101,6 +103,79 @@ def test_stats_song_search_route(monkeypatch):
         assert payload["limit"] == 2
         assert len(payload["results"]) == 2
         assert {row["song_id"] for row in payload["results"]} == {125, 812}
+
+
+def test_stats_song_rankings_route(monkeypatch):
+    base_time = datetime(2026, 3, 1, 12, 0, 0)
+    plays = [
+        SimpleNamespace(
+            song_id=125,
+            difficulty="expert",
+            live_type="normal_live",
+            timestamp=base_time,
+            filename="a.png",
+            perfect=100,
+            great=0,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=True,
+            all_perfect=False,
+        ),
+        SimpleNamespace(
+            song_id=125,
+            difficulty="expert",
+            live_type="normal_live",
+            timestamp=base_time,
+            filename="b.png",
+            perfect=110,
+            great=0,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=True,
+            all_perfect=True,
+        ),
+        SimpleNamespace(
+            song_id=812,
+            difficulty="hard",
+            live_type="event_live",
+            timestamp=base_time,
+            filename="c.png",
+            perfect=90,
+            great=10,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=False,
+            all_perfect=False,
+        ),
+    ]
+
+    class _FakeSongService:
+        def get_all_songs(self):
+            return [
+                SimpleNamespace(internal_song_id=125, name={"en": "Unite! From A To Z"}),
+                SimpleNamespace(internal_song_id=812, name={"en": "Cover Song"}),
+            ]
+
+    class _FakeScreenshotService:
+        def get_screenshots_by_user(self, user_id):
+            assert user_id == 7
+            return plays
+
+    monkeypatch.setattr(stats_router, "song_service", _FakeSongService())
+    monkeypatch.setattr(stats_router, "screenshot_service", _FakeScreenshotService())
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/users/7/stats/songs/rankings",
+            params={"difficulty": "expert", "sort_by": "play_count"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["items"][0]["song_name"] == "Unite! From A To Z"
+        assert payload["items"][0]["play_count"] == 2
 
 
 def test_stats_song_detail_route_with_difficulty(monkeypatch):
@@ -386,6 +461,147 @@ def test_stats_insights_route(monkeypatch):
         assert payload["data_quality"]["observed_plays"] == 3
         assert payload["session_gap_minutes"] == 45
         assert isinstance(payload["repetition"]["most_looped_songs"], list)
+
+
+def test_stats_overview_respects_meta_song_exclusions(monkeypatch):
+    base = datetime(2026, 3, 10, 12, 0, 0)
+    plays = [
+        SimpleNamespace(
+            id=1,
+            song_id=10,
+            difficulty="expert",
+            live_type="free live",
+            timestamp=base,
+            perfect=100,
+            great=0,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=True,
+            all_perfect=False,
+            filename="meta.png",
+        ),
+        SimpleNamespace(
+            id=2,
+            song_id=20,
+            difficulty="expert",
+            live_type="free live",
+            timestamp=base,
+            perfect=90,
+            great=10,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=False,
+            all_perfect=False,
+            filename="real.png",
+        ),
+    ]
+
+    class _FakeScreenshotService:
+        def get_screenshots_by_user(self, _user_id):
+            return plays
+
+    class _FakeSongService:
+        def get_song_by_internal_id(self, song_id):
+            return SimpleNamespace(internal_song_id=song_id, name={"en": f"Song {song_id}"})
+
+    monkeypatch.setattr(stats_router, "screenshot_service", _FakeScreenshotService())
+    monkeypatch.setattr(stats_router, "song_service", _FakeSongService())
+    monkeypatch.setattr(stats_router, "META_SONG_IDS", [10])
+    monkeypatch.setattr(stats_router.UploadStorageService, "resolve_user_file", lambda self, user_id, filename: None)
+    monkeypatch.setattr(stats_router.ScanService, "find_success_image_path", lambda self, filename: None)
+
+    with TestClient(app) as client:
+        response = client.get("/api/users/7/stats")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["total_plays"] == 1
+    assert payload["top_songs"][0]["song_id"] == 20
+    assert payload["exclusion_context"]["effective_song_ids"] == [10]
+
+
+def test_stats_progression_recap_event_and_journey_routes(monkeypatch):
+    base = datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc)
+    plays = [
+        SimpleNamespace(
+            id=1,
+            song_id=30,
+            difficulty="expert",
+            live_type="free live",
+            timestamp=base,
+            perfect=100,
+            great=0,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=True,
+            all_perfect=False,
+            filename="a.png",
+        ),
+        SimpleNamespace(
+            id=2,
+            song_id=30,
+            difficulty="expert",
+            live_type="multi live",
+            timestamp=base.replace(day=12),
+            perfect=101,
+            great=0,
+            good=0,
+            bad=0,
+            miss=0,
+            full_combo=True,
+            all_perfect=True,
+            filename="b.png",
+        ),
+    ]
+
+    class _FakeScreenshotService:
+        def get_screenshots_by_user(self, _user_id):
+            return plays
+
+        def get_screenshots_by_song(self, _user_id, _song_id, difficulty=None):
+            assert difficulty in {None, "expert"}
+            return plays
+
+    class _FakeSongService:
+        def get_song_by_internal_id(self, song_id):
+            return SimpleNamespace(internal_song_id=song_id, name={"en": "Song 30"}, length=120.0)
+
+        def get_all_songs(self):
+            return [SimpleNamespace(internal_song_id=30, name={"en": "Song 30"}, length=120.0)]
+
+    class _FakeEventService:
+        def get_event_by_event_id(self, event_id):
+            return SimpleNamespace(
+                event_id=event_id,
+                event_name={"en": "Test Event"},
+                event_type="story",
+                event_start_at={"en": int(base.timestamp() * 1000)},
+                event_end_at={"en": int(base.replace(day=15).timestamp() * 1000)},
+            )
+
+    monkeypatch.setattr(stats_router, "screenshot_service", _FakeScreenshotService())
+    monkeypatch.setattr(stats_router, "song_service", _FakeSongService())
+    monkeypatch.setattr(stats_router, "event_service", _FakeEventService())
+    monkeypatch.setattr(stats_router.UploadStorageService, "resolve_user_file", lambda self, user_id, filename: None)
+    monkeypatch.setattr(stats_router.ScanService, "find_success_image_path", lambda self, filename: None)
+
+    with TestClient(app) as client:
+        progression = client.get("/api/users/7/stats/progression", params={"scope": "monthly", "count": 3})
+        recap = client.get("/api/users/7/stats/recap", params={"scope": "monthly"})
+        event = client.get("/api/users/7/stats/events/99")
+        journey = client.get("/api/users/7/stats/songs/30/journey", params={"difficulty": "expert"})
+
+    assert progression.status_code == 200
+    assert len(progression.json()["points"]) == 3
+    assert recap.status_code == 200
+    assert recap.json()["top_songs"][0]["song_id"] == 30
+    assert event.status_code == 200
+    assert event.json()["event_id"] == 99
+    assert journey.status_code == 200
+    assert journey.json()["difficulty"] == "expert"
 
 
 def test_import_json_folder_route(monkeypatch):

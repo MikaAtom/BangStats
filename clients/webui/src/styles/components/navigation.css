@@ -1,0 +1,33 @@
+/* Navigation Styles - Flat list design */
+
+.nav {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.nav-link {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  border: 1px solid transparent;
+  background: transparent;
+  transition: background var(--transition-fast),
+              border-color var(--transition-fast);
+  display: block;
+  text-decoration: none;
+}
+
+.nav-link:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border-subtle);
+}
+
+.nav-link.active {
+  background: var(--purple-700);
+  border-color: var(--border-purple);
+  color: var(--purple-50);
+}
+
+.nav-link.active:hover {
+  background: var(--purple-600);
+}

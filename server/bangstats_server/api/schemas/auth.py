@@ -20,6 +20,17 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1)
 
 
+class LegacyPasswordSetupRequest(BaseModel):
+    username: str = Field(min_length=1)
+    game_id: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class LegacyLoginRequest(BaseModel):
+    username: str = Field(min_length=1)
+    game_id: str = Field(min_length=1)
+
+
 class AuthResponse(BaseModel):
     token: str
     user: UserResponse

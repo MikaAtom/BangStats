@@ -1,0 +1,100 @@
+/* Form Styles - Simple borders, no fancy effects */
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  padding: var(--space-3) var(--space-4);
+  transition: border-color var(--transition-fast),
+              box-shadow var(--transition-fast);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--purple-500);
+  box-shadow: 0 0 0 3px rgba(131, 102, 255, 0.2);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+textarea {
+  min-height: 16rem;
+  resize: vertical;
+  font-family: var(--font-mono);
+}
+
+/* Field Layout */
+.field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.field label {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+}
+
+.inline-field {
+  max-width: 300px;
+}
+
+.date-range-picker {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.date-range-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.date-range-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+/* Checkbox */
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.check input {
+  width: auto;
+  cursor: pointer;
+}
+
+.check label {
+  cursor: pointer;
+}
+
+/* Select */
+select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url('data:image/svg+xml;charset=UTF-8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"><path fill="%23a8a8b8" d="M6 9L1 4h10z"/></svg>');
+  background-repeat: no-repeat;
+  background-position: right var(--space-3) center;
+  padding-right: var(--space-8);
+}
+
+@media (max-width: 640px) {
+  .date-range-inputs {
+    grid-template-columns: 1fr;
+  }
+}
