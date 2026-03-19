@@ -167,3 +167,5 @@ _other/
 *sandbox.py
 cache/
 /storage/
+
+clients/webui/node_modules/
