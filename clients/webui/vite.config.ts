@@ -3,7 +3,13 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");
-  const apiTarget = env.BANGSTATS_API_TARGET || env.VITE_API_TARGET || "http://127.0.0.1:8000";
+  const shellEnv = ((globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env) || {};
+  const apiTarget =
+    shellEnv.BANGSTATS_API_TARGET ||
+    shellEnv.VITE_API_TARGET ||
+    env.BANGSTATS_API_TARGET ||
+    env.VITE_API_TARGET ||
+    "http://127.0.0.1:8000";
 
   return {
     plugins: [react()],
