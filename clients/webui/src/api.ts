@@ -555,10 +555,17 @@ class ApiClient {
     if (!response.ok) {
       let detail = response.statusText;
       try {
-        const payload = (await response.json()) as { detail?: string };
-        detail = payload.detail || detail;
+        const raw = await response.text();
+        if (raw) {
+          try {
+            const payload = JSON.parse(raw) as { detail?: string };
+            detail = payload.detail || raw || detail;
+          } catch {
+            detail = raw;
+          }
+        }
       } catch {
-        detail = await response.text();
+        detail = response.statusText;
       }
       throw new Error(detail || "Request failed");
     }
