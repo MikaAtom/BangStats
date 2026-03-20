@@ -1,3 +1,4 @@
+import os
 from threading import Lock
 
 from sqlalchemy import inspect, text
@@ -12,7 +13,26 @@ _engine_lock = Lock()
 
 
 def _create_db_engine():
-    return create_engine(SQLITE_URL, echo=False)
+    pool_size = int(os.getenv("BANGSTATS_DB_POOL_SIZE", "20"))
+    max_overflow = int(os.getenv("BANGSTATS_DB_MAX_OVERFLOW", "40"))
+    pool_timeout = int(os.getenv("BANGSTATS_DB_POOL_TIMEOUT", "60"))
+    pool_recycle = int(os.getenv("BANGSTATS_DB_POOL_RECYCLE", "1800"))
+    sqlite_busy_timeout = int(os.getenv("BANGSTATS_SQLITE_BUSY_TIMEOUT", "60"))
+
+    return create_engine(
+        SQLITE_URL,
+        echo=False,
+        connect_args={
+            # Scan and polling flows run across multiple threads/processes.
+            "check_same_thread": False,
+            "timeout": sqlite_busy_timeout,
+        },
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout,
+        pool_recycle=pool_recycle,
+        pool_pre_ping=True,
+    )
 
 
 # Create engine
