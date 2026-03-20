@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Iterable
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -179,40 +180,80 @@ def _filtered_user_screenshots(
     return filtered, context
 
 
-def _resolve_image_url(user_id: int, filename: str | None) -> str | None:
-    if not filename:
+def _song_names_for_ids(song_service: SongService, server: str, song_ids: Iterable[int]) -> dict[int, str]:
+    sanitized = sorted({int(song_id) for song_id in song_ids if int(song_id) > 0})
+    if not sanitized:
+        return {}
+    if hasattr(song_service, "get_songs_by_internal_ids"):
+        songs = song_service.get_songs_by_internal_ids(sanitized)
+    else:
+        songs = [song_service.get_song_by_internal_id(song_id) for song_id in sanitized]
+    by_id = {int(song.internal_song_id): song for song in songs}
+    return {
+        song_id: _song_display_name(by_id.get(song_id), server, fallback_id=song_id)
+        for song_id in sanitized
+    }
+
+
+class _ImageUrlResolver:
+    def __init__(self, user_id: int, user: User | None, screenshots: list | None = None):
+        self.user_id = user_id
+        self.user = user
+        self._storage = UploadStorageService()
+        self._scan_service = ScanService()
+        self._filename_to_screenshot_id: dict[str, int] = {}
+        if screenshots:
+            self._populate_filename_map(screenshots)
+
+    def _populate_filename_map(self, screenshots: list):
+        for screenshot in screenshots:
+            filename = str(getattr(screenshot, "filename", "") or "").strip()
+            screenshot_id = getattr(screenshot, "id", None)
+            if filename and screenshot_id:
+                self._filename_to_screenshot_id[filename] = int(screenshot_id)
+
+    def _ensure_filename_map(self):
+        if self._filename_to_screenshot_id:
+            return
+        screenshots = _screenshot_service_instance().get_screenshots_by_user(self.user_id)
+        self._populate_filename_map(screenshots)
+
+    def _server_folder_candidate(self, filename: str) -> Path | None:
+        if not self.user or getattr(self.user, "screenshots_source", "local") != "server_folder":
+            return None
+        root = str(getattr(self.user, "screenshots_path", "") or "").strip()
+        if not root:
+            return None
+        candidate = Path(root).expanduser() / Path(filename).name
+        if candidate.exists() and candidate.is_file():
+            return candidate
         return None
-    storage = UploadStorageService()
-    scan_service = ScanService()
-    safe_name = filename
 
-    if storage.resolve_user_file(user_id, safe_name) is not None:
-        return f"/api/users/{user_id}/uploads/{safe_name}"
+    def resolve(self, filename: str | None) -> str | None:
+        if not filename:
+            return None
+        safe_name = str(filename)
 
-    user = UserService().get_user_by_id(user_id)
-    if user and getattr(user, "screenshots_source", "local") == "server_folder":
-        root = str(getattr(user, "screenshots_path", "") or "").strip()
-        if root:
-            candidate = Path(root).expanduser() / Path(safe_name).name
-            if candidate.exists() and candidate.is_file():
-                matches = _screenshot_service_instance().get_screenshots_by_user(user_id)
-                for screenshot in matches:
-                    if getattr(screenshot, "filename", None) == safe_name and getattr(screenshot, "id", None):
-                        return f"/api/users/{user_id}/screenshots/{int(screenshot.id)}/image"
+        if self._storage.resolve_user_file(self.user_id, safe_name) is not None:
+            return f"/api/users/{self.user_id}/uploads/{safe_name}"
 
-    if scan_service.find_success_image_path(safe_name) is not None:
-        matches = _screenshot_service_instance().get_screenshots_by_user(user_id)
-        for screenshot in matches:
-            if getattr(screenshot, "filename", None) == safe_name and getattr(screenshot, "id", None):
-                return f"/api/users/{user_id}/screenshots/{int(screenshot.id)}/image"
-    return None
+        server_candidate = self._server_folder_candidate(safe_name)
+        scan_candidate = self._scan_service.find_success_image_path(safe_name)
+        if server_candidate is None and scan_candidate is None:
+            return None
+
+        self._ensure_filename_map()
+        screenshot_id = self._filename_to_screenshot_id.get(safe_name)
+        if screenshot_id:
+            return f"/api/users/{self.user_id}/screenshots/{screenshot_id}/image"
+        return None
 
 
-def _with_image_url(user_id: int, meta: dict | None):
+def _with_image_url(image_resolver: _ImageUrlResolver, meta: dict | None):
     if not meta:
         return None
     payload = dict(meta)
-    payload["image_url"] = _resolve_image_url(user_id, payload.get("filename"))
+    payload["image_url"] = image_resolver.resolve(payload.get("filename"))
     return payload
 
 
@@ -272,19 +313,20 @@ def get_user_stats(
         include_meta=include_meta,
     )
     song_service = _song_service_instance()
+    image_resolver = _ImageUrlResolver(user_id, current_user, screenshots)
 
     summary = compute_general_summary(screenshots)
     top_songs = compute_top_songs(screenshots, n=8)
+    recent = compute_recent_plays(screenshots, n=5)
+    referenced_song_ids = [int(item.get("song_id", 0)) for item in [*top_songs, *recent]]
+    song_names = _song_names_for_ids(song_service, current_user.server, referenced_song_ids)
     for item in top_songs:
         song_id = int(item.get("song_id", 0))
-        song = song_service.get_song_by_internal_id(song_id) if song_id > 0 else None
-        item["song_name"] = _song_display_name(song, current_user.server, fallback_id=song_id)
-    recent = compute_recent_plays(screenshots, n=5)
+        item["song_name"] = song_names.get(song_id, f"Song {song_id}")
     for item in recent:
         song_id = int(item.get("song_id", 0))
-        song = song_service.get_song_by_internal_id(song_id) if song_id > 0 else None
-        item["song_name"] = _song_display_name(song, current_user.server, fallback_id=song_id)
-        item["image_url"] = _resolve_image_url(user_id, item.get("filename"))
+        item["song_name"] = song_names.get(song_id, f"Song {song_id}")
+        item["image_url"] = image_resolver.resolve(item.get("filename"))
 
     return StatsResponse(
         summary=summary,
@@ -345,10 +387,10 @@ def get_user_song_rankings(
         live_type=live_type,
         include_meta=include_meta,
     )
-    song_names = {
-        int(song.internal_song_id): _song_display_name(song, current_user.server)
-        for song in _song_service_instance().get_all_songs()
-    }
+    song_service = _song_service_instance()
+    image_resolver = _ImageUrlResolver(user_id, current_user, screenshots)
+    song_ids = [int(getattr(item, "song_id", 0) or 0) for item in screenshots]
+    song_names = _song_names_for_ids(song_service, current_user.server, song_ids)
     rankings = compute_song_rankings(
         screenshots,
         song_names=song_names,
@@ -356,7 +398,7 @@ def get_user_song_rankings(
         limit=limit,
     )
     for item in rankings:
-        item["latest_play"] = _with_image_url(user_id, item.get("latest_play"))
+        item["latest_play"] = _with_image_url(image_resolver, item.get("latest_play"))
     return SongRankingsResponse(
         sort_by=sort_by,
         difficulty=difficulty.strip().lower() if isinstance(difficulty, str) and difficulty.strip() else None,
@@ -384,6 +426,7 @@ def get_user_song_stats(
         raise HTTPException(status_code=404, detail=f"Song not found: {song_id}")
 
     song_plays = screenshot_service.get_screenshots_by_song(user_id, song_id)
+    image_resolver = _ImageUrlResolver(user_id, current_user)
     if not song_plays:
         raise HTTPException(status_code=404, detail=f"No plays found for song {song_id}")
 
@@ -424,7 +467,7 @@ def get_user_song_stats(
             session_gap_minutes=session_gap_minutes,
         )
         for field_name in ["first_played", "last_played", "first_fc", "last_fc", "first_ap", "last_ap"]:
-            detail_payload[field_name] = _with_image_url(user_id, detail_payload.get(field_name))
+            detail_payload[field_name] = _with_image_url(image_resolver, detail_payload.get(field_name))
         detail = SongDifficultyDetail(**detail_payload)
 
     return SongStatsResponse(
@@ -434,7 +477,7 @@ def get_user_song_stats(
             SongDifficultyOverviewItem(
                 difficulty=item.difficulty,
                 total_plays=item.total_plays,
-                first_played=_with_image_url(user_id, item.first_played.model_dump()) if item.first_played else None,
+                first_played=_with_image_url(image_resolver, item.first_played.model_dump()) if item.first_played else None,
                 estimated_time_played_seconds=item.estimated_time_played_seconds,
                 estimated_time_played_human=item.estimated_time_played_human,
             )
@@ -461,9 +504,10 @@ def get_user_stats_milestones(
         live_type=live_type,
         include_meta=include_meta,
     )
+    image_resolver = _ImageUrlResolver(user_id, current_user, screenshots)
     payload = compute_milestones(screenshots)
     for item in payload.get("milestones", []):
-        item["meta"] = _with_image_url(user_id, item.get("meta"))
+        item["meta"] = _with_image_url(image_resolver, item.get("meta"))
     return StatsMilestonesResponse(**payload)
 
 
@@ -557,10 +601,7 @@ def get_user_stats_insights(
         for screenshot in screenshots
         if int(getattr(screenshot, "song_id", 0)) > 0
     }
-    song_map = {
-        song_id: song_service.get_song_by_internal_id(song_id)
-        for song_id in song_ids
-    }
+    song_map = {int(song.internal_song_id): song for song in song_service.get_songs_by_internal_ids(list(song_ids))}
     song_lengths_seconds = {
         song_id: _song_length_seconds(song)
         for song_id, song in song_map.items()
@@ -635,10 +676,9 @@ def get_user_event_stats(
         include_meta=include_meta,
     )
     event, start, end = _resolve_event_range(event_id, current_user.server)
-    song_map = {
-        int(song.internal_song_id): _song_display_name(song, current_user.server)
-        for song in _song_service_instance().get_all_songs()
-    }
+    song_service = _song_service_instance()
+    song_ids = [int(getattr(item, "song_id", 0) or 0) for item in screenshots]
+    song_map = _song_names_for_ids(song_service, current_user.server, song_ids)
     payload = compute_event_stats(
         screenshots,
         song_names=song_map,
@@ -678,6 +718,7 @@ def get_user_song_journey(
             raise HTTPException(status_code=404, detail="No playable difficulties found")
         target_difficulty = sorted(grouped.items(), key=lambda item: (-item[1], _difficulty_sort_key(item[0])))[0][0]
     plays = _screenshot_service_instance().get_screenshots_by_song(user_id, song_id, target_difficulty)
+    image_resolver = _ImageUrlResolver(user_id, current_user)
     payload = compute_song_journey(
         plays,
         song_id=song_id,
@@ -687,9 +728,9 @@ def get_user_song_journey(
         session_gap_minutes=session_gap_minutes,
     )
     for field_name in ["first_played", "first_fc", "first_ap"]:
-        payload[field_name] = _with_image_url(user_id, payload.get(field_name))
+        payload[field_name] = _with_image_url(image_resolver, payload.get(field_name))
     for item in payload.get("timeline", []):
-        item["image_url"] = _resolve_image_url(user_id, item.get("filename"))
+        item["image_url"] = image_resolver.resolve(item.get("filename"))
     return SongJourneyResponse(**payload, exclusion_context=_resolve_exclusion_context(current_user))
 
 
@@ -732,10 +773,10 @@ def get_user_recap(
         if isinstance(getattr(play, "timestamp", None), datetime)
         and compare_from <= getattr(play, "timestamp").date() <= compare_to
     ]
-    song_map = {
-        int(song.internal_song_id): _song_display_name(song, current_user.server)
-        for song in _song_service_instance().get_all_songs()
-    }
+    song_service = _song_service_instance()
+    image_resolver = _ImageUrlResolver(user_id, current_user, screenshots)
+    song_ids = [int(getattr(item, "song_id", 0) or 0) for item in screenshots]
+    song_map = _song_names_for_ids(song_service, current_user.server, song_ids)
     payload = compute_recap(
         screenshots,
         scope=scope,
@@ -748,7 +789,7 @@ def get_user_recap(
     )
     for song_key in ["top_songs", "new_songs", "most_practiced"]:
         for item in payload.get(song_key, []):
-            item["latest_play"] = _with_image_url(user_id, item.get("latest_play"))
+            item["latest_play"] = _with_image_url(image_resolver, item.get("latest_play"))
     for highlight in payload.get("highlights", []):
-        highlight["screenshot"] = _with_image_url(user_id, highlight.get("screenshot"))
+        highlight["screenshot"] = _with_image_url(image_resolver, highlight.get("screenshot"))
     return RecapResponse(**payload, exclusion_context=exclusion_context)

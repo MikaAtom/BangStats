@@ -531,8 +531,47 @@ type UnauthorizedHandler = () => void;
 class ApiClient {
   private token: string | null = null;
   private unauthorizedHandler: UnauthorizedHandler | null = null;
+  private readonly cacheTtlMs = 2 * 60 * 1000;
+  private readonly maxBlobConcurrency = 4;
+  private readonly jsonCache = new Map<string, { expiresAt: number; value: unknown }>();
+  private readonly inFlightJson = new Map<string, Promise<unknown>>();
+  private readonly blobCache = new Map<string, { expiresAt: number; value: Blob }>();
+  private readonly inFlightBlob = new Map<string, Promise<Blob>>();
+  private activeBlobRequests = 0;
+  private readonly blobQueue: Array<() => void> = [];
+
+  private buildCacheKey(path: string, method: string) {
+    return `${method}::${path}::${this.token || "anon"}`;
+  }
+
+  private clearCaches() {
+    this.jsonCache.clear();
+    this.blobCache.clear();
+  }
+
+  private async acquireBlobSlot() {
+    if (this.activeBlobRequests < this.maxBlobConcurrency) {
+      this.activeBlobRequests += 1;
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      this.blobQueue.push(() => {
+        this.activeBlobRequests += 1;
+        resolve();
+      });
+    });
+  }
+
+  private releaseBlobSlot() {
+    this.activeBlobRequests = Math.max(0, this.activeBlobRequests - 1);
+    const next = this.blobQueue.shift();
+    if (next) next();
+  }
 
   setToken(token: string | null) {
+    if (this.token !== token) {
+      this.clearCaches();
+    }
     this.token = token;
   }
 
@@ -541,6 +580,24 @@ class ApiClient {
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const method = (init.method || "GET").toUpperCase();
+    const isGet = method === "GET";
+    const cacheKey = this.buildCacheKey(path, method);
+
+    if (isGet) {
+      const cached = this.jsonCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return cached.value as T;
+      }
+      this.jsonCache.delete(cacheKey);
+
+      const pending = this.inFlightJson.get(cacheKey);
+      if (pending) {
+        return (await pending) as T;
+      }
+    }
+
+    const execute = async (): Promise<T> => {
     const headers = new Headers(init.headers);
     if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
@@ -572,10 +629,48 @@ class ApiClient {
     if (response.status === 204) {
       return undefined as T;
     }
-    return (await response.json()) as T;
+      const payload = (await response.json()) as T;
+      if (isGet) {
+        this.jsonCache.set(cacheKey, {
+          expiresAt: Date.now() + this.cacheTtlMs,
+          value: payload,
+        });
+      } else {
+        this.clearCaches();
+      }
+      return payload;
+    };
+
+    if (!isGet) {
+      return execute();
+    }
+
+    const inFlight = execute();
+    this.inFlightJson.set(cacheKey, inFlight as Promise<unknown>);
+    try {
+      return await inFlight;
+    } finally {
+      this.inFlightJson.delete(cacheKey);
+    }
   }
 
   async secureBlob(path: string) {
+    const method = "GET";
+    const cacheKey = this.buildCacheKey(path, method);
+    const cached = this.blobCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+    this.blobCache.delete(cacheKey);
+
+    const pending = this.inFlightBlob.get(cacheKey);
+    if (pending) {
+      return await pending;
+    }
+
+    const execute = async () => {
+    await this.acquireBlobSlot();
+    try {
     const headers = new Headers();
     if (this.token) {
       headers.set("Authorization", `Bearer ${this.token}`);
@@ -584,7 +679,24 @@ class ApiClient {
     if (!response.ok) {
       throw new Error("Image request failed");
     }
-    return await response.blob();
+      const blob = await response.blob();
+      this.blobCache.set(cacheKey, {
+        expiresAt: Date.now() + this.cacheTtlMs,
+        value: blob,
+      });
+      return blob;
+    } finally {
+      this.releaseBlobSlot();
+    }
+    };
+
+    const inFlight = execute();
+    this.inFlightBlob.set(cacheKey, inFlight);
+    try {
+      return await inFlight;
+    } finally {
+      this.inFlightBlob.delete(cacheKey);
+    }
   }
 
   login(username: string, password: string) {

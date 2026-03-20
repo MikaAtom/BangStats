@@ -15,6 +15,17 @@ class SongRepository(BaseRepository[Song]):
         statement = select(Song).where(Song.internal_song_id == internal_song_id)
         return self._session.exec(statement).first()
 
+    def get_by_internal_ids(self, internal_song_ids: List[int]) -> List[Song]:
+        """Retrieve songs by a list of internal_song_id values."""
+        if not internal_song_ids:
+            return []
+        sanitized = sorted({int(song_id) for song_id in internal_song_ids if int(song_id) > 0})
+        if not sanitized:
+            return []
+
+        statement = select(Song).where(Song.internal_song_id.in_(sanitized))
+        return self._session.exec(statement).all()
+
     def get_by_tag(self, tag: str) -> List[Song]:
         """Retrieve songs by tag."""
         if not tag or not isinstance(tag, str):

@@ -37,9 +37,15 @@ from bangstats_server.core.services.stats import compute_general_summary, filter
 router = APIRouter()
 
 
-def _song_name_map(server: str) -> dict[int, str]:
+def _song_name_map(server: str, song_ids: set[int] | None = None) -> dict[int, str]:
     names: dict[int, str] = {}
-    for song in SongService().get_all_songs():
+    song_service = SongService()
+    songs = []
+    if song_ids and hasattr(song_service, "get_songs_by_internal_ids"):
+        songs = song_service.get_songs_by_internal_ids(sorted(song_ids))
+    if not songs:
+        songs = song_service.get_all_songs()
+    for song in songs:
         if isinstance(song.name, dict):
             names[int(song.internal_song_id)] = (
                 song.name.get(server)
@@ -230,7 +236,6 @@ def get_dashboard(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    song_names = _song_name_map(user.server)
     screenshot_service = ScreenshotService()
     scan_service = ScanService()
     screenshots = screenshot_service.get_screenshots_by_user(user_id)
@@ -239,6 +244,12 @@ def get_dashboard(
         key=lambda item: item.timestamp,
         reverse=True,
     )[:8]
+    recent_song_ids = {
+        int(getattr(screenshot, "song_id", 0) or 0)
+        for screenshot in recent_screenshots
+        if int(getattr(screenshot, "song_id", 0) or 0) > 0
+    }
+    song_names = _song_name_map(user.server, recent_song_ids)
 
     counts = get_db_counts()
     current_event = EventService().get_current_event(language=user.server)
@@ -309,7 +320,6 @@ def list_screenshots(
 ):
     user_id = assert_user_scope(user_id, current_user)
     screenshot_service = ScreenshotService()
-    song_names = _song_name_map(current_user.server)
     scan_service = ScanService()
 
     if song_id is not None:
@@ -320,6 +330,14 @@ def list_screenshots(
         )
     else:
         screenshots = screenshot_service.get_screenshots_by_user(user_id)
+
+    song_ids = {
+        int(getattr(screenshot, "song_id", 0) or 0)
+        for screenshot in screenshots
+        if int(getattr(screenshot, "song_id", 0) or 0) > 0
+    }
+    song_names = _song_name_map(current_user.server, song_ids)
+
     screenshots = _apply_screenshot_filters(
         screenshots,
         current_user=current_user,

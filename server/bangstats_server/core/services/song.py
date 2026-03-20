@@ -28,6 +28,16 @@ class SongService(BaseCRUDService):
         logger.debug(f"Fetching song by internal id: {internal_song_id}")
         return self._repo.get_by_internal_id(internal_song_id)
 
+    def get_songs_by_internal_ids(self, internal_song_ids: List[int]) -> List[Song]:
+        """Get songs by their internal IDs with basic validation."""
+        if not internal_song_ids:
+            return []
+        sanitized = sorted({int(song_id) for song_id in internal_song_ids if int(song_id) > 0})
+        if not sanitized:
+            return []
+        logger.debug("Fetching songs by internal ids: {}", sanitized)
+        return self._repo.get_by_internal_ids(sanitized)
+
     def get_all_songs(self) -> List[Song]:
         """Get all songs from the database."""
         logger.debug("Fetching all songs from database")
