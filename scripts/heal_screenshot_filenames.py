@@ -270,6 +270,11 @@ def main() -> None:
         _print_items("Ambiguous stem matches (manual review)", ambiguous, args.limit)
         print()
         _print_items("Collisions skipped (target already exists in DB)", collisions, args.limit)
+        if collisions and not args.resolve_collisions:
+            print(
+                "  note: collision cleanup is disabled. "
+                "Re-run with --resolve-collisions to delete stale duplicate rows."
+            )
         print()
         delete_lines = [
             (
