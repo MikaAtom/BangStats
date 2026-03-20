@@ -134,7 +134,7 @@ export type ReferenceSongItem = {
   internal_song_id: number;
   tag: string;
   name: Record<string, string>;
-  note_counts: Record<string, number[]>;
+  note_counts: Record<string, number | number[]>;
   special?: Record<string, unknown> | null;
   levels?: Record<string, number[]>;
   band_id?: number;

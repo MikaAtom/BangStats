@@ -195,10 +195,15 @@ function songSupportsSpecial(song: ReferenceSongItem | null) {
 
 function getExpectedNotes(song: ReferenceSongItem | null, difficulty: string) {
   if (!song) return null;
-  const values = song.note_counts?.[difficulty];
-  if (!Array.isArray(values) || values.length === 0) return null;
-  const first = values[0];
-  return typeof first === "number" ? first : null;
+  const raw = song.note_counts?.[difficulty];
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) ? Math.trunc(raw) : null;
+  }
+  if (Array.isArray(raw) && raw.length > 0) {
+    const first = raw[0];
+    return typeof first === "number" && Number.isFinite(first) ? Math.trunc(first) : null;
+  }
+  return null;
 }
 
 function getSongValidationIssues(
