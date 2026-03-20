@@ -323,6 +323,7 @@ def create_scan_job(
 ):
     user_id = assert_user_scope(data.user_id, current_user)
     allowed_suffixes = {".png", ".jpg", ".jpeg", ".heic", ".heif"}
+    scan_job_service = ScanJobService()
 
     if data.source_type == "upload":
         upload_dir = UploadStorageService().ensure_user_dir(user_id)
@@ -364,7 +365,25 @@ def create_scan_job(
     if not image_list:
         raise HTTPException(status_code=400, detail="No files available for scan job")
 
-    job = ScanJobService().create_job(
+    if hasattr(scan_job_service, "list_active_jobs"):
+        active_jobs = scan_job_service.list_active_jobs(user_id=user_id)
+        for active in active_jobs:
+            if active.source_type != data.source_type:
+                continue
+            if data.source_type == "upload":
+                raise HTTPException(status_code=409, detail=f"Scan job #{active.id} is already active for uploads")
+            active_path = str(active.folder_path or "").strip()
+            requested_path = str(folder_path or "").strip()
+            if active_path and requested_path and active_path == requested_path:
+                raise HTTPException(status_code=409, detail=f"Scan job #{active.id} is already active for this folder")
+
+    if hasattr(scan_service, "compute_filename_diff"):
+        diff = scan_service.compute_filename_diff(user_id=user_id, filenames=image_list)
+        image_list = sorted(set(diff.get("to_scan_filenames") or []))
+        if not image_list:
+            raise HTTPException(status_code=400, detail="No new files to scan")
+
+    job = scan_job_service.create_job(
         user_id=user_id,
         source_type=data.source_type,
         folder_path=folder_path,

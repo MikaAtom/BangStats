@@ -22,6 +22,7 @@ import {
   type ErrorDetail,
   type ErrorList,
   type EventStatsResponse,
+  type FilenameDiffResponse,
   type InsightsResponse,
   type MilestonesResponse,
   type MetaSongConfigResponse,
@@ -590,12 +591,14 @@ function ScanPage() {
   const auth = useAuth();
   const navigate = useNavigate();
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedSource, setSelectedSource] = useState<"upload" | "server_folder">("upload");
   const [folderPath, setFolderPath] = useState("");
   const [jsonFolderPath, setJsonFolderPath] = useState("");
   const [masterKey, setMasterKey] = useState("");
   const [parallelWorkers, setParallelWorkers] = useState("1");
   const [keysPerWorker, setKeysPerWorker] = useState("1");
   const [message, setMessage] = useState<string | null>(null);
+  const [diffPreview, setDiffPreview] = useState<FilenameDiffResponse | null>(null);
   const uploads = useLoadable(auth.user ? () => api.listUploads(auth.user!.id) : null, [auth.user?.id]);
   const usage = useLoadable(auth.user ? () => api.getUploadUsage(auth.user!.id) : null, [auth.user?.id]);
   const capabilities = useLoadable(() => api.getScanCapabilities(), []);
@@ -603,6 +606,21 @@ function ScanPage() {
 
   if (!auth.user) return null;
   const user = auth.user;
+
+  useEffect(() => {
+    setFolderPath(user.screenshots_path || "");
+    setSelectedSource(user.screenshots_source === "server_folder" ? "server_folder" : "upload");
+  }, [user.id, user.screenshots_source, user.screenshots_path]);
+
+  useEffect(() => {
+    const currentJobs = jobs.data?.jobs || [];
+    const hasActive = currentJobs.some((job) => ["queued", "running"].includes(job.status));
+    if (!hasActive) return;
+    const timer = window.setInterval(() => {
+      void jobs.reload();
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [jobs.data?.jobs]);
 
   async function refreshAll() {
     await Promise.all([uploads.reload(), usage.reload(), jobs.reload()]);
@@ -623,16 +641,38 @@ function ScanPage() {
     }
   }
 
+  async function persistScanSettings(source: "upload" | "server_folder", path: string) {
+    const updated = await api.updateUser(user.id, {
+      screenshots_source: source === "server_folder" ? "server_folder" : "local",
+      screenshots_path: path,
+    });
+    auth.login(localStorage.getItem("bangstats.web.token") || "", updated);
+  }
+
   async function startUploadScan() {
-    setMessage("Queueing upload scan...");
+    setDiffPreview(null);
+    setMessage("Checking uploaded file diff...");
     try {
+      await persistScanSettings("upload", folderPath);
+      const candidates = (uploads.data?.items || []).map((item) => item.filename).filter(Boolean);
+      if (!candidates.length) {
+        setMessage("No uploaded files available to scan.");
+        return;
+      }
+      const diff = await api.getScanFilenameDiff(user.id, candidates);
+      setDiffPreview(diff);
+      if (!diff.to_scan_count) {
+        setMessage(`No new files to scan. Already indexed: ${diff.already_scanned_count}`);
+        return;
+      }
       const job = await api.createScanJob({
         user_id: user.id,
         source_type: "upload",
+        filenames: diff.to_scan_filenames,
         parallel_workers: Number(parallelWorkers) || undefined,
         keys_per_worker: Number(keysPerWorker) || undefined,
       });
-      setMessage(`Scan job #${job.id} queued.`);
+      setMessage(`Scan job #${job.id} queued (${diff.to_scan_count} new file(s)).`);
       await refreshAll();
       navigate(`/scan/jobs/${job.id}`);
     } catch (err) {
@@ -651,7 +691,9 @@ function ScanPage() {
   }
 
   async function startServerFolderScan() {
+    setDiffPreview(null);
     try {
+      await persistScanSettings("server_folder", folderPath);
       const validated = await api.checkLocalPath(folderPath, user.id);
       const job = await api.createScanJob({
         user_id: user.id,
@@ -660,7 +702,7 @@ function ScanPage() {
         parallel_workers: Number(parallelWorkers) || undefined,
         keys_per_worker: Number(keysPerWorker) || undefined,
       });
-      setMessage(`Server-folder scan #${job.id} queued.`);
+      setMessage(`Server-folder scan #${job.id} queued (${job.total_files} new file(s)).`);
       await jobs.reload();
       navigate(`/scan/jobs/${job.id}`);
     } catch (err) {
@@ -682,6 +724,50 @@ function ScanPage() {
     <div className="page-grid">
       <SectionHeader title="Scanning" />
       {message && <div className="notice">{message}</div>}
+      {diffPreview && (
+        <div className="notice">
+          Diff summary: requested {diffPreview.total_requested}, already scanned {diffPreview.already_scanned_count}, to scan {diffPreview.to_scan_count}.
+        </div>
+      )}
+      <Card title="Scan settings">
+        <div className="stack">
+          <label className="field inline-field">
+            <span>Scan source</span>
+            <select value={selectedSource} onChange={(event) => setSelectedSource(event.target.value as "upload" | "server_folder") }>
+              <option value="upload">Upload storage</option>
+              <option value="server_folder">Server folder</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Folder path on server</span>
+            <input value={folderPath} onChange={(event) => setFolderPath(event.target.value)} placeholder="/srv/screenshots/user1" />
+          </label>
+          <label className="field">
+            <span>Parallel workers</span>
+            <input value={parallelWorkers} onChange={(event) => setParallelWorkers(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>Keys per worker</span>
+            <input value={keysPerWorker} onChange={(event) => setKeysPerWorker(event.target.value)} />
+          </label>
+          <div className="button-row">
+            <button
+              className="button accent"
+              type="button"
+              disabled={selectedSource === "server_folder" && !user.server_folder_authorized}
+              onClick={() => {
+                if (selectedSource === "server_folder") {
+                  void startServerFolderScan();
+                } else {
+                  void startUploadScan();
+                }
+              }}
+            >
+              Start scan
+            </button>
+          </div>
+        </div>
+      </Card>
       <div className="layout-two">
         <Card title="1. Browser upload flow">
           <div className="stack">
@@ -699,18 +785,7 @@ function ScanPage() {
               <button className="button primary" onClick={() => void uploadSelected()}>
                 Upload to storage
               </button>
-              <button className="button accent" onClick={() => void startUploadScan()}>
-                Scan uploaded files
-              </button>
             </div>
-            <label className="field">
-              <span>Parallel workers</span>
-              <input value={parallelWorkers} onChange={(event) => setParallelWorkers(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>Keys per worker</span>
-              <input value={keysPerWorker} onChange={(event) => setKeysPerWorker(event.target.value)} />
-            </label>
             {capabilities.data && (
               <div className="inline-meta">
                 OCR: {capabilities.data.provider} | Google keys: {capabilities.data.available_google_keys}
@@ -726,13 +801,6 @@ function ScanPage() {
             </label>
             <button className="button ghost" onClick={() => void authorizeAndRefresh()}>
               Authorize server-folder access
-            </button>
-            <label className="field">
-              <span>Folder path on server</span>
-              <input value={folderPath} onChange={(event) => setFolderPath(event.target.value)} placeholder="/srv/screenshots/user1" />
-            </label>
-            <button className="button primary" disabled={!user.server_folder_authorized} onClick={() => void startServerFolderScan()}>
-              Queue server-folder scan
             </button>
             <div className="inline-meta">
               Authorized: {user.server_folder_authorized ? "Yes" : "No"}

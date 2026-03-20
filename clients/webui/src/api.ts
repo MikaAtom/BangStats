@@ -78,6 +78,15 @@ export type UploadUsage = {
   oldest_file_age_days: number;
 };
 
+export type FilenameDiffResponse = {
+  user_id: number;
+  total_requested: number;
+  already_scanned_count: number;
+  to_scan_count: number;
+  already_scanned_filenames: string[];
+  to_scan_filenames: string[];
+};
+
 export type UploadFileItem = {
   filename: string;
   size_bytes: number;
@@ -816,6 +825,13 @@ class ApiClient {
     return this.request<{ is_local: boolean; canonical_path?: string | null }>("/api/scans/check-local-path", {
       method: "POST",
       body: JSON.stringify({ folder_path, user_id }),
+    });
+  }
+
+  getScanFilenameDiff(user_id: number, filenames: string[]) {
+    return this.request<FilenameDiffResponse>("/api/scans/filename-diff", {
+      method: "POST",
+      body: JSON.stringify({ user_id, filenames }),
     });
   }
 
