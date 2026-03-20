@@ -6,6 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from loguru import logger
 
 if "--dev" in sys.argv:
     load_dotenv(".env.dev", override=True)
@@ -13,6 +14,7 @@ else:
     load_dotenv()
 
 from bangstats_server.api.routers import api_router
+import bangstats_server.core.logging  # noqa: F401
 
 from bangstats_server.core.admin import flush_with_backup
 from bangstats_server.core.config import (
@@ -35,6 +37,7 @@ from bangstats_server.core.services.dev_simulation import DevSimulationService
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    logger.info("BangStats server starting (env={})", BANGSTATS_ENV)
     if not DISABLE_LEGACY_CACHE_MIGRATION:
         migrate_legacy_cache_dirs()
         migrate_legacy_storage_dirs()
@@ -49,6 +52,7 @@ async def lifespan(_: FastAPI):
     )
     UploadStorageService().cleanup_all_expired()
     yield
+    logger.info("BangStats server stopping")
 
 
 def create_app() -> FastAPI:
