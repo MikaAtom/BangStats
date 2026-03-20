@@ -553,6 +553,14 @@ class ApiClient {
     return `${method}::${path}::${this.token || "anon"}`;
   }
 
+  private isCacheableGetPath(path: string) {
+    const volatilePrefixes = [
+      "/api/scans/jobs",
+      "/api/sync/jobs",
+    ];
+    return !volatilePrefixes.some((prefix) => path.startsWith(prefix));
+  }
+
   private clearCaches() {
     this.jsonCache.clear();
     this.blobCache.clear();
@@ -591,9 +599,10 @@ class ApiClient {
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const method = (init.method || "GET").toUpperCase();
     const isGet = method === "GET";
+    const useGetCache = isGet && this.isCacheableGetPath(path);
     const cacheKey = this.buildCacheKey(path, method);
 
-    if (isGet) {
+    if (useGetCache) {
       const cached = this.jsonCache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
         return cached.value as T;
@@ -639,7 +648,7 @@ class ApiClient {
       return undefined as T;
     }
       const payload = (await response.json()) as T;
-      if (isGet) {
+      if (useGetCache) {
         this.jsonCache.set(cacheKey, {
           expiresAt: Date.now() + this.cacheTtlMs,
           value: payload,
@@ -650,7 +659,7 @@ class ApiClient {
       return payload;
     };
 
-    if (!isGet) {
+    if (!useGetCache) {
       return execute();
     }
 
