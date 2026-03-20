@@ -1,8 +1,10 @@
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Iterable
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
 
 from bangstats_server.api.dependencies import assert_user_scope, get_current_user
 from bangstats_server.api.schemas.stats import (
@@ -257,6 +259,11 @@ def _with_image_url(image_resolver: _ImageUrlResolver, meta: dict | None):
     return payload
 
 
+def _log_route_timing(route_name: str, started_at: float) -> None:
+    elapsed_ms = (perf_counter() - started_at) * 1000.0
+    logger.debug("route={} elapsed_ms={:.2f}", route_name, elapsed_ms)
+
+
 def _parse_event_boundary(value, server: str):
     timestamp_ms = parse_event_timestamp_ms(value, language=server)
     if timestamp_ms is None:
@@ -304,36 +311,40 @@ def get_user_stats(
     include_meta: bool = Query(False),
     current_user: User = Depends(get_current_user),
 ):
-    user_id = assert_user_scope(user_id, current_user)
-    screenshots, exclusion_context = _filtered_user_screenshots(
-        user_id,
-        current_user,
-        difficulty=difficulty,
-        live_type=live_type,
-        include_meta=include_meta,
-    )
-    song_service = _song_service_instance()
-    image_resolver = _ImageUrlResolver(user_id, current_user, screenshots)
+    started_at = perf_counter()
+    try:
+        user_id = assert_user_scope(user_id, current_user)
+        screenshots, exclusion_context = _filtered_user_screenshots(
+            user_id,
+            current_user,
+            difficulty=difficulty,
+            live_type=live_type,
+            include_meta=include_meta,
+        )
+        song_service = _song_service_instance()
+        image_resolver = _ImageUrlResolver(user_id, current_user, screenshots)
 
-    summary = compute_general_summary(screenshots)
-    top_songs = compute_top_songs(screenshots, n=8)
-    recent = compute_recent_plays(screenshots, n=5)
-    referenced_song_ids = [int(item.get("song_id", 0)) for item in [*top_songs, *recent]]
-    song_names = _song_names_for_ids(song_service, current_user.server, referenced_song_ids)
-    for item in top_songs:
-        song_id = int(item.get("song_id", 0))
-        item["song_name"] = song_names.get(song_id, f"Song {song_id}")
-    for item in recent:
-        song_id = int(item.get("song_id", 0))
-        item["song_name"] = song_names.get(song_id, f"Song {song_id}")
-        item["image_url"] = image_resolver.resolve(item.get("filename"))
+        summary = compute_general_summary(screenshots)
+        top_songs = compute_top_songs(screenshots, n=8)
+        recent = compute_recent_plays(screenshots, n=5)
+        referenced_song_ids = [int(item.get("song_id", 0)) for item in [*top_songs, *recent]]
+        song_names = _song_names_for_ids(song_service, current_user.server, referenced_song_ids)
+        for item in top_songs:
+            song_id = int(item.get("song_id", 0))
+            item["song_name"] = song_names.get(song_id, f"Song {song_id}")
+        for item in recent:
+            song_id = int(item.get("song_id", 0))
+            item["song_name"] = song_names.get(song_id, f"Song {song_id}")
+            item["image_url"] = image_resolver.resolve(item.get("filename"))
 
-    return StatsResponse(
-        summary=summary,
-        top_songs=top_songs,
-        recent=recent,
-        exclusion_context=exclusion_context,
-    )
+        return StatsResponse(
+            summary=summary,
+            top_songs=top_songs,
+            recent=recent,
+            exclusion_context=exclusion_context,
+        )
+    finally:
+        _log_route_timing("stats.overview", started_at)
 
 
 @router.get("/users/{user_id}/stats/songs/search", response_model=SongSearchResponse)
@@ -496,19 +507,23 @@ def get_user_stats_milestones(
     include_meta: bool = Query(False),
     current_user: User = Depends(get_current_user),
 ):
-    user_id = assert_user_scope(user_id, current_user)
-    screenshots, _ = _filtered_user_screenshots(
-        user_id,
-        current_user,
-        difficulty=difficulty,
-        live_type=live_type,
-        include_meta=include_meta,
-    )
-    image_resolver = _ImageUrlResolver(user_id, current_user, screenshots)
-    payload = compute_milestones(screenshots)
-    for item in payload.get("milestones", []):
-        item["meta"] = _with_image_url(image_resolver, item.get("meta"))
-    return StatsMilestonesResponse(**payload)
+    started_at = perf_counter()
+    try:
+        user_id = assert_user_scope(user_id, current_user)
+        screenshots, _ = _filtered_user_screenshots(
+            user_id,
+            current_user,
+            difficulty=difficulty,
+            live_type=live_type,
+            include_meta=include_meta,
+        )
+        image_resolver = _ImageUrlResolver(user_id, current_user, screenshots)
+        payload = compute_milestones(screenshots)
+        for item in payload.get("milestones", []):
+            item["meta"] = _with_image_url(image_resolver, item.get("meta"))
+        return StatsMilestonesResponse(**payload)
+    finally:
+        _log_route_timing("stats.milestones", started_at)
 
 
 @router.get("/users/{user_id}/stats/activity", response_model=StatsActivityRangeResponse)
@@ -640,20 +655,24 @@ def get_user_stats_progression(
     include_meta: bool = Query(False),
     current_user: User = Depends(get_current_user),
 ):
-    user_id = assert_user_scope(user_id, current_user)
-    screenshots, exclusion_context = _filtered_user_screenshots(
-        user_id,
-        current_user,
-        difficulty=difficulty,
-        live_type=live_type,
-        include_meta=include_meta,
-    )
-    allowed_scopes = {"weekly", "monthly", "yearly"}
-    if scope not in allowed_scopes:
-        raise HTTPException(status_code=400, detail=f"Invalid scope: {scope}")
-    anchor = _parse_iso_date(anchor_date, "anchor_date") if anchor_date else datetime.now(timezone.utc).date()
-    payload = compute_progression(screenshots, scope=scope, anchor=anchor, count=count)
-    return ProgressionResponse(**payload, exclusion_context=exclusion_context)
+    started_at = perf_counter()
+    try:
+        user_id = assert_user_scope(user_id, current_user)
+        screenshots, exclusion_context = _filtered_user_screenshots(
+            user_id,
+            current_user,
+            difficulty=difficulty,
+            live_type=live_type,
+            include_meta=include_meta,
+        )
+        allowed_scopes = {"weekly", "monthly", "yearly"}
+        if scope not in allowed_scopes:
+            raise HTTPException(status_code=400, detail=f"Invalid scope: {scope}")
+        anchor = _parse_iso_date(anchor_date, "anchor_date") if anchor_date else datetime.now(timezone.utc).date()
+        payload = compute_progression(screenshots, scope=scope, anchor=anchor, count=count)
+        return ProgressionResponse(**payload, exclusion_context=exclusion_context)
+    finally:
+        _log_route_timing("stats.progression", started_at)
 
 
 @router.get("/users/{user_id}/stats/events/{event_id}", response_model=EventStatsResponse)
@@ -745,51 +764,55 @@ def get_user_recap(
     include_meta: bool = Query(False),
     current_user: User = Depends(get_current_user),
 ):
-    user_id = assert_user_scope(user_id, current_user)
-    screenshots, exclusion_context = _filtered_user_screenshots(
-        user_id,
-        current_user,
-        difficulty=difficulty,
-        live_type=live_type,
-        include_meta=include_meta,
-    )
-    today = datetime.now(timezone.utc).date()
-    anchor = _parse_iso_date(anchor_date, "anchor_date") if anchor_date else today
-    event_name = None
-    if scope == "event":
-        if event_id is None:
-            raise HTTPException(status_code=400, detail="event_id is required for event scope")
-        event, from_date, to_date = _resolve_event_range(event_id, current_user.server)
-        event_name = getattr(event, "event_name", {}).get(current_user.server) if isinstance(getattr(event, "event_name", None), dict) else getattr(event, "event_name", None)
-    else:
-        if scope not in {"weekly", "monthly", "seasonal", "yearly"}:
-            raise HTTPException(status_code=400, detail=f"Invalid scope: {scope}")
-        from_date, to_date = _range_for_scope(scope, anchor)
-    compare_from = from_date - timedelta(days=(to_date - from_date).days + 1)
-    compare_to = from_date - timedelta(days=1)
-    compare_screenshots = [
-        play
-        for play in screenshots
-        if isinstance(getattr(play, "timestamp", None), datetime)
-        and compare_from <= getattr(play, "timestamp").date() <= compare_to
-    ]
-    song_service = _song_service_instance()
-    image_resolver = _ImageUrlResolver(user_id, current_user, screenshots)
-    song_ids = [int(getattr(item, "song_id", 0) or 0) for item in screenshots]
-    song_map = _song_names_for_ids(song_service, current_user.server, song_ids)
-    payload = compute_recap(
-        screenshots,
-        scope=scope,
-        from_date=from_date,
-        to_date=to_date,
-        song_names=song_map,
-        compare_screenshots=compare_screenshots,
-        event_id=event_id,
-        event_name=event_name,
-    )
-    for song_key in ["top_songs", "new_songs", "most_practiced"]:
-        for item in payload.get(song_key, []):
-            item["latest_play"] = _with_image_url(image_resolver, item.get("latest_play"))
-    for highlight in payload.get("highlights", []):
-        highlight["screenshot"] = _with_image_url(image_resolver, highlight.get("screenshot"))
-    return RecapResponse(**payload, exclusion_context=exclusion_context)
+    started_at = perf_counter()
+    try:
+        user_id = assert_user_scope(user_id, current_user)
+        screenshots, exclusion_context = _filtered_user_screenshots(
+            user_id,
+            current_user,
+            difficulty=difficulty,
+            live_type=live_type,
+            include_meta=include_meta,
+        )
+        today = datetime.now(timezone.utc).date()
+        anchor = _parse_iso_date(anchor_date, "anchor_date") if anchor_date else today
+        event_name = None
+        if scope == "event":
+            if event_id is None:
+                raise HTTPException(status_code=400, detail="event_id is required for event scope")
+            event, from_date, to_date = _resolve_event_range(event_id, current_user.server)
+            event_name = getattr(event, "event_name", {}).get(current_user.server) if isinstance(getattr(event, "event_name", None), dict) else getattr(event, "event_name", None)
+        else:
+            if scope not in {"weekly", "monthly", "seasonal", "yearly"}:
+                raise HTTPException(status_code=400, detail=f"Invalid scope: {scope}")
+            from_date, to_date = _range_for_scope(scope, anchor)
+        compare_from = from_date - timedelta(days=(to_date - from_date).days + 1)
+        compare_to = from_date - timedelta(days=1)
+        compare_screenshots = [
+            play
+            for play in screenshots
+            if isinstance(getattr(play, "timestamp", None), datetime)
+            and compare_from <= getattr(play, "timestamp").date() <= compare_to
+        ]
+        song_service = _song_service_instance()
+        image_resolver = _ImageUrlResolver(user_id, current_user, screenshots)
+        song_ids = [int(getattr(item, "song_id", 0) or 0) for item in screenshots]
+        song_map = _song_names_for_ids(song_service, current_user.server, song_ids)
+        payload = compute_recap(
+            screenshots,
+            scope=scope,
+            from_date=from_date,
+            to_date=to_date,
+            song_names=song_map,
+            compare_screenshots=compare_screenshots,
+            event_id=event_id,
+            event_name=event_name,
+        )
+        for song_key in ["top_songs", "new_songs", "most_practiced"]:
+            for item in payload.get(song_key, []):
+                item["latest_play"] = _with_image_url(image_resolver, item.get("latest_play"))
+        for highlight in payload.get("highlights", []):
+            highlight["screenshot"] = _with_image_url(image_resolver, highlight.get("screenshot"))
+        return RecapResponse(**payload, exclusion_context=exclusion_context)
+    finally:
+        _log_route_timing("stats.recap", started_at)

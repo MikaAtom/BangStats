@@ -1417,6 +1417,7 @@ function ScreenshotsAnalyticsView() {
   const auth = useAuth();
   const [filters, setFilters] = useState<SectionFilterState>({ difficulty: "", liveType: "", includeMeta: false });
   const [songQuery, setSongQuery] = useState("");
+  const [appliedSongQuery, setAppliedSongQuery] = useState("");
   const [songMatches, setSongMatches] = useState<Array<{ song_id: number; song_name: string }>>([]);
   const [sortBy, setSortBy] = useState<"timestamp" | "song_name" | "score" | "accuracy">("timestamp");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
@@ -1431,7 +1432,7 @@ function ScreenshotsAnalyticsView() {
           api.listScreenshots(auth.user!.id, {
             ...sectionFiltersToQuery(filters),
             ...absoluteRange,
-            song_query: songQuery.trim() || undefined,
+            song_query: appliedSongQuery.trim() || undefined,
             sort_by: sortBy,
             sort_order: sortOrder,
             limit: 24,
@@ -1445,7 +1446,7 @@ function ScreenshotsAnalyticsView() {
       range.preset,
       range.from,
       range.to,
-      songQuery,
+      appliedSongQuery,
       sortBy,
       sortOrder,
       filters.difficulty,
@@ -1481,11 +1482,18 @@ function ScreenshotsAnalyticsView() {
                   value={songQuery}
                   onChange={(event) => {
                     setSongQuery(event.target.value);
-                    setOffset(0);
                   }}
                   placeholder="Filter screenshots by song name"
                 />
-                <button className="button primary" type="button" onClick={() => void runSongSearch()}>
+                <button
+                  className="button primary"
+                  type="button"
+                  onClick={() => {
+                    void runSongSearch();
+                    setAppliedSongQuery(songQuery.trim());
+                    setOffset(0);
+                  }}
+                >
                   Search
                 </button>
               </div>
@@ -1516,6 +1524,7 @@ function ScreenshotsAnalyticsView() {
                   type="button"
                   onClick={() => {
                     setSongQuery(song.song_name);
+                    setAppliedSongQuery(song.song_name);
                     setOffset(0);
                   }}
                 >

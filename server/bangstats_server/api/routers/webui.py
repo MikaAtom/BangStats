@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
+from time import monotonic
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
@@ -35,6 +36,23 @@ from bangstats_server.core.sync import get_db_counts
 from bangstats_server.core.services.stats import compute_general_summary, filter_excluded_songs, filter_stats_plays
 
 router = APIRouter()
+
+_SCAN_ERRORS_CACHE_TTL_SECONDS = 10.0
+_scan_errors_cache: dict[str, object] = {
+    "expires_at": 0.0,
+    "value": {"total": 0, "errors": {}, "error_files": {}},
+}
+
+
+def _cached_scan_errors(scan_service: ScanService):
+    now = monotonic()
+    expires_at = float(_scan_errors_cache.get("expires_at", 0.0) or 0.0)
+    if expires_at > now:
+        return _scan_errors_cache.get("value")
+    value = scan_service.list_error_files()
+    _scan_errors_cache["value"] = value
+    _scan_errors_cache["expires_at"] = now + _SCAN_ERRORS_CACHE_TTL_SECONDS
+    return value
 
 
 def _song_name_map(server: str, song_ids: set[int] | None = None) -> dict[int, str]:
@@ -288,7 +306,7 @@ def get_dashboard(
         stats=stats_payload,
         scan_jobs=[_scan_job_response(job) for job in scan_jobs],
         sync_jobs=[_sync_job_response(job) for job in sync_jobs if job.requested_by_user_id in {None, user_id}],
-        scan_errors=scan_service.list_error_files(),
+        scan_errors=_cached_scan_errors(scan_service),
         recent_screenshots=[
             _screenshot_item(
                 screenshot,
