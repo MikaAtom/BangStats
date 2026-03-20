@@ -52,12 +52,32 @@ def _song_name_map(server: str) -> dict[int, str]:
     return names
 
 
-def _resolve_screenshot_image_path(user_id: int, filename: str | None, scan_service: ScanService) -> Path | None:
+def _resolve_server_folder_image_path(user: User | None, filename: str | None) -> Path | None:
+    if not user or not filename:
+        return None
+    if getattr(user, "screenshots_source", "local") != "server_folder":
+        return None
+    root = str(getattr(user, "screenshots_path", "") or "").strip()
+    if not root:
+        return None
+    safe_name = Path(filename).name
+    if not safe_name:
+        return None
+    candidate = Path(root).expanduser() / safe_name
+    if candidate.exists() and candidate.is_file():
+        return candidate
+    return None
+
+
+def _resolve_screenshot_image_path(user_id: int, user: User | None, filename: str | None, scan_service: ScanService) -> Path | None:
     if not filename:
         return None
     storage_path = UploadStorageService().resolve_user_file(user_id, filename)
     if storage_path:
         return storage_path
+    server_folder_path = _resolve_server_folder_image_path(user, filename)
+    if server_folder_path:
+        return server_folder_path
     success_path = scan_service.find_success_image_path(filename)
     if success_path:
         return success_path
@@ -68,10 +88,11 @@ def _screenshot_item(
     screenshot,
     *,
     user_id: int,
+    user: User,
     song_names: dict[int, str],
     scan_service: ScanService,
 ) -> ScreenshotItemResponse:
-    image_path = _resolve_screenshot_image_path(user_id, getattr(screenshot, "filename", None), scan_service)
+    image_path = _resolve_screenshot_image_path(user_id, user, getattr(screenshot, "filename", None), scan_service)
     image_url = None
     if image_path is not None:
         image_url = f"/api/users/{user_id}/screenshots/{int(screenshot.id)}/image"
@@ -261,6 +282,7 @@ def get_dashboard(
             _screenshot_item(
                 screenshot,
                 user_id=user_id,
+                user=user,
                 song_names=song_names,
                 scan_service=scan_service,
             )
@@ -324,6 +346,7 @@ def list_screenshots(
             _screenshot_item(
                 screenshot,
                 user_id=user_id,
+                user=current_user,
                 song_names=song_names,
                 scan_service=scan_service,
             )
@@ -343,7 +366,7 @@ def get_screenshot_image(
     if not screenshot or int(screenshot.user_id) != user_id:
         raise HTTPException(status_code=404, detail="Screenshot not found")
 
-    path = _resolve_screenshot_image_path(user_id, screenshot.filename, ScanService())
+    path = _resolve_screenshot_image_path(user_id, current_user, screenshot.filename, ScanService())
     if path is None:
         raise HTTPException(status_code=404, detail="Screenshot image not found")
     return FileResponse(path)
@@ -415,7 +438,7 @@ def export_user_data(
     references: list[ExportScreenshotReference] = []
     for screenshot in screenshots:
         filename = getattr(screenshot, "filename", None)
-        image_path = _resolve_screenshot_image_path(user_id, filename, scan_service)
+        image_path = _resolve_screenshot_image_path(user_id, user, filename, scan_service)
         direct_path = storage.resolve_user_file(user_id, filename) if filename else None
         references.append(
             ExportScreenshotReference(

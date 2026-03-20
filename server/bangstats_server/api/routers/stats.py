@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -27,6 +28,7 @@ from bangstats_server.core.services.event_time import parse_event_timestamp_ms
 from bangstats_server.core.services.scan import ScanService
 from bangstats_server.core.services.upload_storage import UploadStorageService
 from bangstats_server.core.services.song import SongService
+from bangstats_server.core.services.user import UserService
 from bangstats_server.core.db.models.user import User
 from bangstats_server.core.services.stats import (
     compute_activity_range,
@@ -182,12 +184,26 @@ def _resolve_image_url(user_id: int, filename: str | None) -> str | None:
         return None
     storage = UploadStorageService()
     scan_service = ScanService()
-    if storage.resolve_user_file(user_id, filename) is not None:
-        return f"/api/users/{user_id}/uploads/{filename}"
-    if scan_service.find_success_image_path(filename) is not None:
+    safe_name = filename
+
+    if storage.resolve_user_file(user_id, safe_name) is not None:
+        return f"/api/users/{user_id}/uploads/{safe_name}"
+
+    user = UserService().get_user_by_id(user_id)
+    if user and getattr(user, "screenshots_source", "local") == "server_folder":
+        root = str(getattr(user, "screenshots_path", "") or "").strip()
+        if root:
+            candidate = Path(root).expanduser() / Path(safe_name).name
+            if candidate.exists() and candidate.is_file():
+                matches = _screenshot_service_instance().get_screenshots_by_user(user_id)
+                for screenshot in matches:
+                    if getattr(screenshot, "filename", None) == safe_name and getattr(screenshot, "id", None):
+                        return f"/api/users/{user_id}/screenshots/{int(screenshot.id)}/image"
+
+    if scan_service.find_success_image_path(safe_name) is not None:
         matches = _screenshot_service_instance().get_screenshots_by_user(user_id)
         for screenshot in matches:
-            if getattr(screenshot, "filename", None) == filename and getattr(screenshot, "id", None):
+            if getattr(screenshot, "filename", None) == safe_name and getattr(screenshot, "id", None):
                 return f"/api/users/{user_id}/screenshots/{int(screenshot.id)}/image"
     return None
 
