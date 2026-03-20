@@ -2,110 +2,50 @@ import type { ReactNode } from "react";
 import { FormEvent, useEffect, useState } from "react";
 import {
   Link,
-  const navigate = useNavigate();
   NavLink,
   Navigate,
   Route,
   Routes,
-  const referenceSongs = useLoadable<{ max_id: number; items: ReferenceSongItem[] }>(
-    auth.user ? () => api.getReferenceSongs(0, 5000) : null,
-    [auth.user?.id],
-  );
-  const [form, setForm] = useState<CorrectionFormState | null>(null);
-  const [payloadText, setPayloadText] = useState("");
-  const [advancedMode, setAdvancedMode] = useState(false);
+  useLocation,
   useNavigate,
   useParams,
   useSearchParams,
 } from "react-router-dom";
-      const nextForm = parseCorrectionForm(detail.data.scan_data);
-      setForm(nextForm);
-      setPayloadText(JSON.stringify(correctionFormToPayload(nextForm), null, 2));
-      setAdvancedMode(false);
+
 import { useAuth } from "./auth";
 import {
-
-  useEffect(() => {
-    if (form && !advancedMode) {
-      setPayloadText(JSON.stringify(correctionFormToPayload(form), null, 2));
-    }
-  }, [form, advancedMode]);
   api,
   type ActivityResponse,
   type CalendarResponse,
-
-  const songs = referenceSongs.data?.items || [];
-  const songQuery = form?.song_name_from_top_bar_text || "";
-  const songMatches = getSongOptions(songs, songQuery, user.server);
-  const selectedSong =
-    form && songQuery.trim()
-      ? songs.find((song) => correctionSongName(song, user.server).toLowerCase() === songQuery.trim().toLowerCase()) || null
-      : null;
-  const availableDifficulties = selectedSong && songSupportsSpecial(selectedSong) ? [...CORRECTION_DIFFICULTIES] : CORRECTION_DIFFICULTIES.filter((item) => item !== "special");
-  const backendValidation = detail.data?.validation as Record<string, unknown> | null | undefined;
-  const issues = form ? getSongValidationIssues(form, selectedSong, backendValidation) : [];
-  const blockingIssues = issues.filter((issue) => issue.tone !== "warning");
-  const rawJsonError = advancedMode
-    ? (() => {
-        try {
-          JSON.parse(payloadText);
-          return null;
-        } catch (err) {
-          return err instanceof Error ? err.message : "Invalid JSON";
-        }
-      })()
-    : null;
-  const canSave = Boolean(form) && !rawJsonError && (form?.anomaly || blockingIssues.length === 0);
-
-  function updateFormField<K extends keyof CorrectionFormState>(field: K, value: CorrectionFormState[K]) {
-    setForm((current) => (current ? { ...current, [field]: value } : current));
-  }
-
-  function selectSong(song: ReferenceSongItem) {
-    updateFormField("song_name_from_top_bar_text", correctionSongName(song, user.server));
-  }
   type DashboardResponse,
+  type ErrorCategoryActionResponse,
+  type ErrorDetail,
+  type ErrorList,
   type EventStatsResponse,
   type FilenameDiffResponse,
-      const payload = advancedMode ? (JSON.parse(payloadText) as Record<string, unknown>) : correctionFormToPayload(form || parseCorrectionForm({}));
+  type InsightsResponse,
   type MilestonesResponse,
   type MetaSongConfigResponse,
   type ProgressionResponse,
   type RecapResponse,
-        anomaly: Boolean((payload as Record<string, unknown>).anomaly),
   type ReferenceSongItem,
   type SongRankingsResponse,
   type ScanJob,
-          ? result.saved_as_anomaly
-            ? `Saved as anomaly. Persisted=${result.persisted} duplicate=${result.skipped_duplicates}`
-            : `Correction succeeded. Persisted=${result.persisted} duplicate=${result.skipped_duplicates}`
-          : `Still invalid. Moved to ${result.error_type || "unchanged"}.`,
+  type ScanResult,
+  type ScreenshotItem,
   type StatsRangeQuery,
   type SongJourneyResponse,
   type SongStatsResponse,
   type StatsOverview,
   type SyncJob,
   type UploadFileItem,
-
-  async function deleteError() {
-    const confirmed = window.confirm("Delete this error entry and matching DB row? This cannot be undone.");
-    if (!confirmed) return;
-    try {
-      const result = await api.deleteError(errorType, jsonFilename, { user_id: user.id });
-      setMessage(`Deleted error entry. Removed DB rows: ${result.removed_db_rows}`);
-      navigate("/scan/errors");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Delete failed");
-    }
-  }
   type User,
 } from "./api";
 
-      <SectionHeader title={jsonFilename} action={<button className="button ghost" onClick={() => void deleteError()}>Delete</button>} />
 import { Card, MetricCard, LoadingCard, LoadingInline, EmptyState, SectionHeader, SecureImage, DateRangePicker, type DateRangeValue } from "./components/ui";
 import { KeyValueList, JobList } from "./components/data-display";
 import { BarChart, ActivityBars, CalendarHeatmap, TrendChart } from "./components/charts";
-      {detail.data && form && (
+import { UploadGallery, ScreenshotGallery } from "./components/galleries";
 import {
   formatDateRange,
   formatDateTime,
@@ -115,175 +55,11 @@ import {
   formatLiveType,
   formatShortDate,
   groupActiveHours,
-          <Card title="Validation" actions={<button className="button ghost" onClick={() => setAdvancedMode((current) => !current)}>{advancedMode ? "Hide raw JSON" : "Show raw JSON"}</button>}>
-            <div className="stack">
-              <KeyValueList
-                items={[
-                  ["Song", selectedSong ? correctionSongName(selectedSong, user.server) : form.song_name_from_top_bar_text || "Not selected"],
-                  ["Difficulty", form.difficulty || "--"],
-                  ["Live type", form.live_type || "--"],
-                  ["Expected notes", String(getExpectedNotes(selectedSong, form.difficulty) ?? "--")],
-                  ["Current notes", String(form.perfect + form.great + form.good + form.bad + form.miss)],
-                  ["Fast + slow", String(form.fast + form.slow)],
-                ]}
-                emptyLabel="No validation summary."
-              />
-              <div className="stack">
-                {issues.length === 0 ? (
-                  <div className="notice success">No blocking issues detected.</div>
-                ) : (
-                  issues.map((issue) => (
-                    <div key={`${issue.title}-${issue.detail}`} className={issue.tone === "error" ? "notice error" : "notice"}>
-                      <strong>{issue.title}.</strong> {issue.detail}
-                    </div>
-                  ))
-                )}
-              </div>
-              {backendValidation && (
-                <details>
-                  <summary>Validation artifact</summary>
-                  <CodeBlock value={backendValidation} />
-                </details>
-              )}
-            </div>
+  resolveEventName,
+} from "./utils/format";
 
-          <Card
-            title="Correction form"
-            className="span-2"
-            actions={
-              <div className="button-row">
-                <button className="button primary" onClick={() => void saveCorrection()} disabled={!canSave}>
-                  Save correction
-                </button>
-              </div>
-            }
-          >
-            <div className="stack">
-              {!canSave && !form.anomaly && <div className="notice error">Fix the highlighted issues before saving, or mark the item as an anomaly.</div>}
-              {form.anomaly && <div className="notice">Anomaly mode is enabled. Save is allowed even if validation still fails.</div>}
-              <div className="layout-two">
-                <div className="field">
-                  <label htmlFor="song_name_from_top_bar_text">Song name</label>
-                  <input
-                    id="song_name_from_top_bar_text"
-                    list="correction-song-options"
-                    value={form.song_name_from_top_bar_text}
-                    onChange={(event) => updateFormField("song_name_from_top_bar_text", event.target.value)}
-                    placeholder="Search and select a song"
-                  />
-                  <datalist id="correction-song-options">
-                    {songMatches.map((song) => (
-                      <option key={song.id} value={correctionSongName(song, user.server)} />
-                    ))}
-                  </datalist>
-                  <div className="inline-meta">Search results: {songMatches.length}</div>
-                  <div className="button-row wrap">
-                    {songMatches.slice(0, 6).map((song) => (
-                      <button key={song.id} className="button ghost" type="button" onClick={() => selectSong(song)}>
-                        {correctionSongName(song, user.server)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="field">
-                  <label htmlFor="difficulty">Difficulty</label>
-                  <select
-                    id="difficulty"
-                    value={form.difficulty}
-                    onChange={(event) => updateFormField("difficulty", event.target.value)}
-                  >
-                    {availableDifficulties.map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="layout-two">
-                <div className="field">
-                  <label htmlFor="live_type">Live type</label>
-                  <select id="live_type" value={form.live_type} onChange={(event) => updateFormField("live_type", event.target.value)}>
-                    {CORRECTION_LIVE_TYPES.map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="check">
-                  <input
-                    id="anomaly"
-                    type="checkbox"
-                    checked={form.anomaly}
-                    onChange={(event) => updateFormField("anomaly", event.target.checked)}
-                  />
-                  <label htmlFor="anomaly">Mark as anomaly</label>
-                </div>
-              </div>
-
-              <div className="stats-grid">
-                {[
-                  ["perfect", form.perfect],
-                  ["great", form.great],
-                  ["good", form.good],
-                  ["bad", form.bad],
-                  ["miss", form.miss],
-                  ["fast", form.fast],
-                  ["slow", form.slow],
-                  ["max_combo", form.max_combo],
-                  ["score", form.score],
-                  ["high_score", form.high_score],
-                ].map(([field, value]) => (
-                  <div className="field" key={String(field)}>
-                    <label htmlFor={String(field)}>{String(field).replace(/_/g, " ")}</label>
-                    <input
-                      id={String(field)}
-                      type="number"
-                      value={String(value)}
-                      onChange={(event) => updateFormField(field as keyof CorrectionFormState, parseNumber(event.target.value, Number(value))) }
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <div className="layout-two">
-                <div className="field">
-                  <label htmlFor="score_rank">Score rank</label>
-                  <input
-                    id="score_rank"
-                    value={form.score_rank}
-                    onChange={(event) => updateFormField("score_rank", event.target.value)}
-                    placeholder="SS, S, A, ..."
-                  />
-                </div>
-                <div className="check">
-                  <input
-                    id="is_new_record"
-                    type="checkbox"
-                    checked={form.is_new_record}
-                    onChange={(event) => updateFormField("is_new_record", event.target.checked)}
-                  />
-                  <label htmlFor="is_new_record">New record</label>
-                </div>
-              </div>
-
-              {advancedMode && (
-                <div className="field">
-                  <label htmlFor="payloadText">Advanced raw JSON</label>
-                  <textarea className="editor" id="payloadText" value={payloadText} onChange={(event) => setPayloadText(event.target.value)} />
-                  {rawJsonError && <div className="notice error">{rawJsonError}</div>}
-                </div>
-              )}
-
-              {!advancedMode && (
-                <details>
-                  <summary>Advanced raw JSON</summary>
-                  <textarea className="editor" value={payloadText} readOnly />
-                </details>
-              )}
-            </div>
+type Loadable<T> = {
+  data: T | null;
   loading: boolean;
   error: string | null;
 };
