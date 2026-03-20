@@ -19,6 +19,9 @@ dependencies = [
 
 [project.scripts]
 bangstats-server = "bangstats_server.app:run"
+heal_screenshot_filenames = "bangstats_server.tools.script_entrypoints:heal_screenshot_filenames"
+dedupe_screenshots = "bangstats_server.tools.script_entrypoints:dedupe_screenshots"
+list_screenshot_diff = "bangstats_server.tools.script_entrypoints:list_screenshot_diff"
 
 [build-system]
 requires = ["hatchling"]
