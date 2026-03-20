@@ -623,7 +623,10 @@ class ApiClient {
     if (this.token) {
       headers.set("Authorization", `Bearer ${this.token}`);
     }
-    const response = await fetch(path, { ...init, headers });
+    const requestInit: RequestInit = useGetCache
+      ? { ...init, headers }
+      : { ...init, headers, cache: "no-store" };
+    const response = await fetch(path, requestInit);
     if (response.status === 401 && this.unauthorizedHandler) {
       this.unauthorizedHandler();
     }
