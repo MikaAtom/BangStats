@@ -17,6 +17,14 @@ class HealCandidate:
     reason: str
 
 
+@dataclass
+class DeleteCandidate:
+    screenshot_id: int
+    old_filename: str
+    kept_ids: list[int]
+    kept_filename: str
+
+
 def _default_db_path(repo_root: Path) -> Path:
     env_name = (os.getenv("BANGSTATS_ENV", "production") or "production").strip().lower()
     override = (os.getenv("BANGSTATS_DB_PATH", "") or "").strip()
@@ -125,6 +133,14 @@ def main() -> None:
         help="Apply updates to DB (default is dry-run)",
     )
     parser.add_argument(
+        "--resolve-collisions",
+        action="store_true",
+        help=(
+            "When a corrected filename already exists in DB, delete the stale row "
+            "whose filename has no file in folder (safe duplicate cleanup)"
+        ),
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=200,
@@ -162,8 +178,15 @@ def main() -> None:
             for row in rows
             if str(row["filename"]).strip()
         )
+        ids_by_filename_norm: dict[str, list[int]] = defaultdict(list)
+        for row in rows:
+            name = str(row["filename"]).strip()
+            if not name:
+                continue
+            ids_by_filename_norm[_normalize(name, args.case_insensitive)].append(int(row["id"]))
 
         candidates: list[HealCandidate] = []
+        delete_candidates: list[DeleteCandidate] = []
         unresolved: list[str] = []
         ambiguous: list[str] = []
         collisions: list[str] = []
@@ -198,6 +221,21 @@ def main() -> None:
 
             if fixed_name_norm in existing_names:
                 collisions.append(f"id={screenshot_id}: {old_name} -> {fixed_name}")
+                if args.resolve_collisions:
+                    kept_ids = [
+                        keep_id
+                        for keep_id in ids_by_filename_norm.get(fixed_name_norm, [])
+                        if keep_id != screenshot_id
+                    ]
+                    if kept_ids:
+                        delete_candidates.append(
+                            DeleteCandidate(
+                                screenshot_id=screenshot_id,
+                                old_filename=old_name,
+                                kept_ids=kept_ids,
+                                kept_filename=fixed_name,
+                            )
+                        )
                 continue
 
             reason = f"stem match with extension correction ({Path(old_name).suffix} -> {Path(fixed_name).suffix})"
@@ -233,12 +271,21 @@ def main() -> None:
         print()
         _print_items("Collisions skipped (target already exists in DB)", collisions, args.limit)
         print()
+        delete_lines = [
+            (
+                f"id={d.screenshot_id}: {d.old_filename} "
+                f"(delete stale row, keep id(s) {d.kept_ids} as {d.kept_filename})"
+            )
+            for d in delete_candidates
+        ]
+        _print_items("Collisions fixable by deleting stale duplicate rows", delete_lines, args.limit)
+        print()
         _print_items("Unresolved (no matching stem in folder)", unresolved, args.limit)
 
         if not args.apply:
             return
 
-        if not candidates:
+        if not candidates and not delete_candidates:
             print("\nNo DB updates applied.")
             return
 
@@ -248,8 +295,11 @@ def main() -> None:
                     "UPDATE screenshot SET filename = ? WHERE id = ?",
                     (item.new_filename, item.screenshot_id),
                 )
+            for item in delete_candidates:
+                conn.execute("DELETE FROM screenshot WHERE id = ?", (item.screenshot_id,))
 
-        print(f"\nApplied updates: {len(candidates)}")
+        print(f"\nApplied filename updates: {len(candidates)}")
+        print(f"Applied stale-duplicate deletes: {len(delete_candidates)}")
 
 
 if __name__ == "__main__":
