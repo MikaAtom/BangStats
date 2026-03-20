@@ -2,50 +2,110 @@ import type { ReactNode } from "react";
 import { FormEvent, useEffect, useState } from "react";
 import {
   Link,
+  const navigate = useNavigate();
   NavLink,
   Navigate,
   Route,
   Routes,
-  useLocation,
+  const referenceSongs = useLoadable<{ max_id: number; items: ReferenceSongItem[] }>(
+    auth.user ? () => api.getReferenceSongs(0, 5000) : null,
+    [auth.user?.id],
+  );
+  const [form, setForm] = useState<CorrectionFormState | null>(null);
+  const [payloadText, setPayloadText] = useState("");
+  const [advancedMode, setAdvancedMode] = useState(false);
   useNavigate,
   useParams,
   useSearchParams,
 } from "react-router-dom";
-
+      const nextForm = parseCorrectionForm(detail.data.scan_data);
+      setForm(nextForm);
+      setPayloadText(JSON.stringify(correctionFormToPayload(nextForm), null, 2));
+      setAdvancedMode(false);
 import { useAuth } from "./auth";
 import {
+
+  useEffect(() => {
+    if (form && !advancedMode) {
+      setPayloadText(JSON.stringify(correctionFormToPayload(form), null, 2));
+    }
+  }, [form, advancedMode]);
   api,
   type ActivityResponse,
   type CalendarResponse,
+
+  const songs = referenceSongs.data?.items || [];
+  const songQuery = form?.song_name_from_top_bar_text || "";
+  const songMatches = getSongOptions(songs, songQuery, user.server);
+  const selectedSong =
+    form && songQuery.trim()
+      ? songs.find((song) => correctionSongName(song, user.server).toLowerCase() === songQuery.trim().toLowerCase()) || null
+      : null;
+  const availableDifficulties = selectedSong && songSupportsSpecial(selectedSong) ? [...CORRECTION_DIFFICULTIES] : CORRECTION_DIFFICULTIES.filter((item) => item !== "special");
+  const backendValidation = detail.data?.validation as Record<string, unknown> | null | undefined;
+  const issues = form ? getSongValidationIssues(form, selectedSong, backendValidation) : [];
+  const blockingIssues = issues.filter((issue) => issue.tone !== "warning");
+  const rawJsonError = advancedMode
+    ? (() => {
+        try {
+          JSON.parse(payloadText);
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : "Invalid JSON";
+        }
+      })()
+    : null;
+  const canSave = Boolean(form) && !rawJsonError && (form?.anomaly || blockingIssues.length === 0);
+
+  function updateFormField<K extends keyof CorrectionFormState>(field: K, value: CorrectionFormState[K]) {
+    setForm((current) => (current ? { ...current, [field]: value } : current));
+  }
+
+  function selectSong(song: ReferenceSongItem) {
+    updateFormField("song_name_from_top_bar_text", correctionSongName(song, user.server));
+  }
   type DashboardResponse,
-  type ErrorCategoryActionResponse,
-  type ErrorDetail,
-  type ErrorList,
   type EventStatsResponse,
   type FilenameDiffResponse,
-  type InsightsResponse,
+      const payload = advancedMode ? (JSON.parse(payloadText) as Record<string, unknown>) : correctionFormToPayload(form || parseCorrectionForm({}));
   type MilestonesResponse,
   type MetaSongConfigResponse,
   type ProgressionResponse,
   type RecapResponse,
+        anomaly: Boolean((payload as Record<string, unknown>).anomaly),
+  type ReferenceSongItem,
   type SongRankingsResponse,
   type ScanJob,
-  type ScanResult,
-  type ScreenshotItem,
+          ? result.saved_as_anomaly
+            ? `Saved as anomaly. Persisted=${result.persisted} duplicate=${result.skipped_duplicates}`
+            : `Correction succeeded. Persisted=${result.persisted} duplicate=${result.skipped_duplicates}`
+          : `Still invalid. Moved to ${result.error_type || "unchanged"}.`,
   type StatsRangeQuery,
   type SongJourneyResponse,
   type SongStatsResponse,
   type StatsOverview,
   type SyncJob,
   type UploadFileItem,
+
+  async function deleteError() {
+    const confirmed = window.confirm("Delete this error entry and matching DB row? This cannot be undone.");
+    if (!confirmed) return;
+    try {
+      const result = await api.deleteError(errorType, jsonFilename, { user_id: user.id });
+      setMessage(`Deleted error entry. Removed DB rows: ${result.removed_db_rows}`);
+      navigate("/scan/errors");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Delete failed");
+    }
+  }
   type User,
 } from "./api";
 
-// Imported components
+      <SectionHeader title={jsonFilename} action={<button className="button ghost" onClick={() => void deleteError()}>Delete</button>} />
 import { Card, MetricCard, LoadingCard, LoadingInline, EmptyState, SectionHeader, SecureImage, DateRangePicker, type DateRangeValue } from "./components/ui";
 import { KeyValueList, JobList } from "./components/data-display";
 import { BarChart, ActivityBars, CalendarHeatmap, TrendChart } from "./components/charts";
-import { UploadGallery, ScreenshotGallery } from "./components/galleries";
+      {detail.data && form && (
 import {
   formatDateRange,
   formatDateTime,
@@ -55,11 +115,175 @@ import {
   formatLiveType,
   formatShortDate,
   groupActiveHours,
-  resolveEventName,
-} from "./utils/format";
+          <Card title="Validation" actions={<button className="button ghost" onClick={() => setAdvancedMode((current) => !current)}>{advancedMode ? "Hide raw JSON" : "Show raw JSON"}</button>}>
+            <div className="stack">
+              <KeyValueList
+                items={[
+                  ["Song", selectedSong ? correctionSongName(selectedSong, user.server) : form.song_name_from_top_bar_text || "Not selected"],
+                  ["Difficulty", form.difficulty || "--"],
+                  ["Live type", form.live_type || "--"],
+                  ["Expected notes", String(getExpectedNotes(selectedSong, form.difficulty) ?? "--")],
+                  ["Current notes", String(form.perfect + form.great + form.good + form.bad + form.miss)],
+                  ["Fast + slow", String(form.fast + form.slow)],
+                ]}
+                emptyLabel="No validation summary."
+              />
+              <div className="stack">
+                {issues.length === 0 ? (
+                  <div className="notice success">No blocking issues detected.</div>
+                ) : (
+                  issues.map((issue) => (
+                    <div key={`${issue.title}-${issue.detail}`} className={issue.tone === "error" ? "notice error" : "notice"}>
+                      <strong>{issue.title}.</strong> {issue.detail}
+                    </div>
+                  ))
+                )}
+              </div>
+              {backendValidation && (
+                <details>
+                  <summary>Validation artifact</summary>
+                  <CodeBlock value={backendValidation} />
+                </details>
+              )}
+            </div>
 
-type Loadable<T> = {
-  data: T | null;
+          <Card
+            title="Correction form"
+            className="span-2"
+            actions={
+              <div className="button-row">
+                <button className="button primary" onClick={() => void saveCorrection()} disabled={!canSave}>
+                  Save correction
+                </button>
+              </div>
+            }
+          >
+            <div className="stack">
+              {!canSave && !form.anomaly && <div className="notice error">Fix the highlighted issues before saving, or mark the item as an anomaly.</div>}
+              {form.anomaly && <div className="notice">Anomaly mode is enabled. Save is allowed even if validation still fails.</div>}
+              <div className="layout-two">
+                <div className="field">
+                  <label htmlFor="song_name_from_top_bar_text">Song name</label>
+                  <input
+                    id="song_name_from_top_bar_text"
+                    list="correction-song-options"
+                    value={form.song_name_from_top_bar_text}
+                    onChange={(event) => updateFormField("song_name_from_top_bar_text", event.target.value)}
+                    placeholder="Search and select a song"
+                  />
+                  <datalist id="correction-song-options">
+                    {songMatches.map((song) => (
+                      <option key={song.id} value={correctionSongName(song, user.server)} />
+                    ))}
+                  </datalist>
+                  <div className="inline-meta">Search results: {songMatches.length}</div>
+                  <div className="button-row wrap">
+                    {songMatches.slice(0, 6).map((song) => (
+                      <button key={song.id} className="button ghost" type="button" onClick={() => selectSong(song)}>
+                        {correctionSongName(song, user.server)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="field">
+                  <label htmlFor="difficulty">Difficulty</label>
+                  <select
+                    id="difficulty"
+                    value={form.difficulty}
+                    onChange={(event) => updateFormField("difficulty", event.target.value)}
+                  >
+                    {availableDifficulties.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="layout-two">
+                <div className="field">
+                  <label htmlFor="live_type">Live type</label>
+                  <select id="live_type" value={form.live_type} onChange={(event) => updateFormField("live_type", event.target.value)}>
+                    {CORRECTION_LIVE_TYPES.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="check">
+                  <input
+                    id="anomaly"
+                    type="checkbox"
+                    checked={form.anomaly}
+                    onChange={(event) => updateFormField("anomaly", event.target.checked)}
+                  />
+                  <label htmlFor="anomaly">Mark as anomaly</label>
+                </div>
+              </div>
+
+              <div className="stats-grid">
+                {[
+                  ["perfect", form.perfect],
+                  ["great", form.great],
+                  ["good", form.good],
+                  ["bad", form.bad],
+                  ["miss", form.miss],
+                  ["fast", form.fast],
+                  ["slow", form.slow],
+                  ["max_combo", form.max_combo],
+                  ["score", form.score],
+                  ["high_score", form.high_score],
+                ].map(([field, value]) => (
+                  <div className="field" key={String(field)}>
+                    <label htmlFor={String(field)}>{String(field).replace(/_/g, " ")}</label>
+                    <input
+                      id={String(field)}
+                      type="number"
+                      value={String(value)}
+                      onChange={(event) => updateFormField(field as keyof CorrectionFormState, parseNumber(event.target.value, Number(value))) }
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="layout-two">
+                <div className="field">
+                  <label htmlFor="score_rank">Score rank</label>
+                  <input
+                    id="score_rank"
+                    value={form.score_rank}
+                    onChange={(event) => updateFormField("score_rank", event.target.value)}
+                    placeholder="SS, S, A, ..."
+                  />
+                </div>
+                <div className="check">
+                  <input
+                    id="is_new_record"
+                    type="checkbox"
+                    checked={form.is_new_record}
+                    onChange={(event) => updateFormField("is_new_record", event.target.checked)}
+                  />
+                  <label htmlFor="is_new_record">New record</label>
+                </div>
+              </div>
+
+              {advancedMode && (
+                <div className="field">
+                  <label htmlFor="payloadText">Advanced raw JSON</label>
+                  <textarea className="editor" id="payloadText" value={payloadText} onChange={(event) => setPayloadText(event.target.value)} />
+                  {rawJsonError && <div className="notice error">{rawJsonError}</div>}
+                </div>
+              )}
+
+              {!advancedMode && (
+                <details>
+                  <summary>Advanced raw JSON</summary>
+                  <textarea className="editor" value={payloadText} readOnly />
+                </details>
+              )}
+            </div>
   loading: boolean;
   error: string | null;
 };
@@ -89,6 +313,187 @@ const DEFAULT_DATE_RANGE: DateRangeValue = {
 const ANALYTICS_VIEWS: AnalyticsView[] = ["overview", "progress", "milestones", "songs", "events", "recap", "screenshots"];
 const DIFFICULTY_FILTERS = ["easy", "normal", "hard", "expert", "special"];
 const LIVE_TYPE_FILTERS = ["normal_live", "event_live", "challenge_live", "multi_live", "vs_live", "free_live"];
+const CORRECTION_DIFFICULTIES = ["easy", "normal", "hard", "expert", "special"] as const;
+const CORRECTION_LIVE_TYPES = ["free live", "multi live", "challenge live", "team live battle", "medley live"] as const;
+
+type CorrectionFormState = {
+  song_name_from_top_bar_text: string;
+  difficulty: string;
+  live_type: string;
+  perfect: number;
+  great: number;
+  good: number;
+  bad: number;
+  miss: number;
+  fast: number;
+  slow: number;
+  max_combo: number;
+  score: number;
+  high_score: number;
+  score_rank: string;
+  is_new_record: boolean;
+  anomaly: boolean;
+};
+
+type CorrectionIssue = {
+  title: string;
+  detail: string;
+  tone?: "default" | "warning" | "error";
+};
+
+function parseBool(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "on", "y"].includes(value.trim().toLowerCase());
+  }
+  return fallback;
+}
+
+function parseNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function parseCorrectionForm(scanData: Record<string, unknown>): CorrectionFormState {
+  return {
+    song_name_from_top_bar_text: String(scanData.song_name_from_top_bar_text || ""),
+    difficulty: String(scanData.difficulty || "expert").toLowerCase(),
+    live_type: String(scanData.live_type || "free live").toLowerCase(),
+    perfect: parseNumber(scanData.perfect, 0),
+    great: parseNumber(scanData.great, 0),
+    good: parseNumber(scanData.good, 0),
+    bad: parseNumber(scanData.bad, 0),
+    miss: parseNumber(scanData.miss, 0),
+    fast: parseNumber(scanData.fast, 0),
+    slow: parseNumber(scanData.slow, 0),
+    max_combo: parseNumber(scanData.max_combo, 0),
+    score: parseNumber(scanData.score, 0),
+    high_score: parseNumber(scanData.high_score, -1),
+    score_rank: String(scanData.score_rank || ""),
+    is_new_record: parseBool(scanData.is_new_record, false),
+    anomaly: parseBool(scanData.anomaly, false),
+  };
+}
+
+function correctionFormToPayload(form: CorrectionFormState): Record<string, unknown> {
+  return {
+    song_name_from_top_bar_text: form.song_name_from_top_bar_text,
+    difficulty: form.difficulty,
+    live_type: form.live_type,
+    perfect: form.perfect,
+    great: form.great,
+    good: form.good,
+    bad: form.bad,
+    miss: form.miss,
+    fast: form.fast,
+    slow: form.slow,
+    max_combo: form.max_combo,
+    score: form.score,
+    high_score: form.high_score,
+    score_rank: form.score_rank,
+    is_new_record: form.is_new_record,
+    anomaly: form.anomaly,
+  };
+}
+
+function correctionSongName(song: ReferenceSongItem, server: User["server"]) {
+  return (
+    song.name[server] ||
+    song.name.en ||
+    song.name.jp ||
+    song.name.tw ||
+    song.name.cn ||
+    song.name.kr ||
+    String(song.internal_song_id)
+  );
+}
+
+function songSupportsSpecial(song: ReferenceSongItem | null) {
+  return Boolean(song?.special && typeof song.special === "object" && (song.special as Record<string, unknown>).available);
+}
+
+function getExpectedNotes(song: ReferenceSongItem | null, difficulty: string) {
+  if (!song) return null;
+  const values = song.note_counts?.[difficulty];
+  if (!Array.isArray(values) || values.length === 0) return null;
+  const first = values[0];
+  return typeof first === "number" ? first : null;
+}
+
+function getSongValidationIssues(
+  form: CorrectionFormState,
+  selectedSong: ReferenceSongItem | null,
+  backendValidation: Record<string, unknown> | null | undefined,
+): CorrectionIssue[] {
+  const issues: CorrectionIssue[] = [];
+  const currentNotes = form.perfect + form.great + form.good + form.bad + form.miss;
+  const expectedNotes = getExpectedNotes(selectedSong, form.difficulty);
+  const totalFastSlow = form.fast + form.slow;
+  const totalMissable = form.great + form.good + form.bad + form.miss;
+
+  if (!form.song_name_from_top_bar_text.trim()) {
+    issues.push({ title: "Song name missing", detail: "Search and select a song before saving.", tone: "error" });
+  } else if (!selectedSong) {
+    issues.push({ title: "Song not resolved", detail: "Pick an exact match from the search suggestions so note counts can be validated.", tone: "error" });
+  }
+
+  if (!form.difficulty || !CORRECTION_DIFFICULTIES.includes(form.difficulty as (typeof CORRECTION_DIFFICULTIES)[number])) {
+    issues.push({ title: "Invalid difficulty", detail: "Pick easy, normal, hard, expert, or special.", tone: "error" });
+  } else if (form.difficulty === "special" && !songSupportsSpecial(selectedSong)) {
+    issues.push({ title: "Special difficulty unavailable", detail: "The selected song does not expose a special chart.", tone: "error" });
+  }
+
+  if (!form.live_type.trim()) {
+    issues.push({ title: "Live type missing", detail: "Choose the live type from the dropdown.", tone: "error" });
+  }
+
+  if (expectedNotes !== null && currentNotes !== expectedNotes) {
+    issues.push({
+      title: "Note count mismatch",
+      detail: `Expected ${expectedNotes} total notes, current sum is ${currentNotes} (${form.perfect}+${form.great}+${form.good}+${form.bad}+${form.miss}).`,
+      tone: "error",
+    });
+  }
+
+  if (totalFastSlow !== totalMissable) {
+    issues.push({
+      title: "Fast/slow mismatch",
+      detail: `Expected fast + slow to match great + good + bad + miss. Current is ${totalFastSlow} vs ${totalMissable}.`,
+      tone: "warning",
+    });
+  }
+
+  if (form.perfect < 0 || form.great < 0 || form.good < 0 || form.bad < 0 || form.miss < 0 || form.fast < 0 || form.slow < 0 || form.max_combo < 0 || form.score < 0 || form.high_score < -1) {
+    issues.push({ title: "Negative values", detail: "Score and count fields must be zero or positive.", tone: "error" });
+  }
+
+  const rawReasons = backendValidation?.reasons;
+  const reasons = Array.isArray(rawReasons) ? rawReasons.filter((item): item is string => typeof item === "string") : [];
+  if (backendValidation?.error_type && reasons.length > 0) {
+    issues.push({
+      title: "Backend validation",
+      detail: `${String(backendValidation.error_type)}: ${reasons.join(" • ")}`,
+      tone: "warning",
+    });
+  }
+
+  return issues;
+}
+
+function getSongOptions(songs: ReferenceSongItem[], query: string, server: User["server"]) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) {
+    return songs.slice(0, 10);
+  }
+  return songs
+    .filter((song) => correctionSongName(song, server).toLowerCase().includes(normalized))
+    .slice(0, 12);
+}
 
 function useLoadable<T>(loader: (() => Promise<T>) | null, deps: unknown[] = []): Loadable<T> & { reload: () => Promise<void> } {
   const [data, setData] = useState<T | null>(null);
@@ -973,48 +1378,120 @@ function ErrorInboxPage() {
 
 function ErrorDetailPage() {
   const auth = useAuth();
+  const navigate = useNavigate();
   const params = useParams();
   const errorType = decodeURIComponent(params.errorType || "");
   const jsonFilename = decodeURIComponent(params.jsonFilename || "");
   const detail = useLoadable<ErrorDetail>(() => api.getErrorDetail(errorType, jsonFilename), [errorType, jsonFilename]);
+  const referenceSongs = useLoadable<{ max_id: number; items: ReferenceSongItem[] }>(
+    auth.user ? () => api.getReferenceSongs(0, 5000) : null,
+    [auth.user?.id],
+  );
+  const [form, setForm] = useState<CorrectionFormState | null>(null);
   const [payloadText, setPayloadText] = useState("");
+  const [advancedMode, setAdvancedMode] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (detail.data) {
-      setPayloadText(JSON.stringify(detail.data.scan_data, null, 2));
+      const nextForm = parseCorrectionForm(detail.data.scan_data);
+      setForm(nextForm);
+      setPayloadText(JSON.stringify(correctionFormToPayload(nextForm), null, 2));
+      setAdvancedMode(false);
     }
   }, [detail.data?.json_filename]);
+
+  useEffect(() => {
+    if (form && !advancedMode) {
+      setPayloadText(JSON.stringify(correctionFormToPayload(form), null, 2));
+    }
+  }, [form, advancedMode]);
 
   if (!auth.user) return null;
   const user = auth.user;
 
+  const songs = referenceSongs.data?.items || [];
+  const songQuery = form?.song_name_from_top_bar_text || "";
+  const songMatches = getSongOptions(songs, songQuery, user.server);
+  const selectedSong =
+    form && songQuery.trim()
+      ? songs.find((song) => correctionSongName(song, user.server).toLowerCase() === songQuery.trim().toLowerCase()) || null
+      : null;
+  const availableDifficulties = selectedSong && songSupportsSpecial(selectedSong)
+    ? [...CORRECTION_DIFFICULTIES]
+    : CORRECTION_DIFFICULTIES.filter((item) => item !== "special");
+  const backendValidation = detail.data?.validation as Record<string, unknown> | null | undefined;
+  const issues = form ? getSongValidationIssues(form, selectedSong, backendValidation) : [];
+  const blockingIssues = issues.filter((issue) => issue.tone !== "warning");
+  const rawJsonError = advancedMode
+    ? (() => {
+        try {
+          JSON.parse(payloadText);
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : "Invalid JSON";
+        }
+      })()
+    : null;
+  const canSave = Boolean(form) && !rawJsonError && (form?.anomaly || blockingIssues.length === 0);
+
+  function updateFormField<K extends keyof CorrectionFormState>(field: K, value: CorrectionFormState[K]) {
+    setForm((current) => (current ? { ...current, [field]: value } : current));
+  }
+
+  function selectSong(song: ReferenceSongItem) {
+    updateFormField("song_name_from_top_bar_text", correctionSongName(song, user.server));
+  }
+
   async function saveCorrection() {
     try {
-      const payload = JSON.parse(payloadText) as Record<string, unknown>;
+      const payload = advancedMode ? (JSON.parse(payloadText) as Record<string, unknown>) : correctionFormToPayload(form || parseCorrectionForm({}));
       const result = await api.correctError(errorType, jsonFilename, {
         user_id: user.id,
         corrected_scan_data: payload,
         persist_to_db: true,
+        anomaly: Boolean((payload as Record<string, unknown>).anomaly),
       });
       setMessage(
         result.is_valid
-          ? `Correction succeeded. Persisted=${result.persisted} duplicate=${result.skipped_duplicates}`
-          : `Still invalid. Moved to ${result.error_type}.`,
+          ? result.saved_as_anomaly
+            ? `Saved as anomaly. Persisted=${result.persisted} duplicate=${result.skipped_duplicates}`
+            : `Correction succeeded. Persisted=${result.persisted} duplicate=${result.skipped_duplicates}`
+          : `Still invalid. Moved to ${result.error_type || "unchanged"}.`,
       );
+      if (result.saved_as_anomaly || result.is_valid) {
+        navigate("/scan/errors");
+        return;
+      }
+      if (result.error_type && result.error_type !== errorType) {
+        navigate(`/scan/errors/${encodeURIComponent(result.error_type)}/${encodeURIComponent(result.image_filename)}`);
+        return;
+      }
       await detail.reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Correction failed");
     }
   }
 
+  async function deleteError() {
+    const confirmed = window.confirm("Delete this error entry and matching DB row? This cannot be undone.");
+    if (!confirmed) return;
+    try {
+      const result = await api.deleteError(errorType, jsonFilename, { user_id: user.id });
+      setMessage(`Deleted error entry. Removed DB rows: ${result.removed_db_rows}`);
+      navigate("/scan/errors");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Delete failed");
+    }
+  }
+
   return (
     <div className="page-grid">
-      <SectionHeader title={jsonFilename} />
+      <SectionHeader title={jsonFilename} action={<button className="button ghost" onClick={() => void deleteError()}>Delete</button>} />
       {message && <div className="notice">{message}</div>}
       {detail.loading && <LoadingCard label="Loading error detail..." />}
       {detail.error && <div className="notice error">{detail.error}</div>}
-      {detail.data && (
+      {detail.data && form && (
         <div className="layout-two">
           <Card title="Screenshot preview">
             <SecureImage
@@ -1024,11 +1501,175 @@ function ErrorDetailPage() {
             />
             <div className="inline-meta">{detail.data.image_filename}</div>
           </Card>
-          <Card title="Validation">
-            <CodeBlock value={detail.data.validation || { note: "No validation artifact found" }} />
+          <Card title="Validation" actions={<button className="button ghost" onClick={() => setAdvancedMode((current) => !current)}>{advancedMode ? "Hide raw JSON" : "Show raw JSON"}</button>}>
+            <div className="stack">
+              <KeyValueList
+                items={[
+                  ["Song", selectedSong ? correctionSongName(selectedSong, user.server) : form.song_name_from_top_bar_text || "Not selected"],
+                  ["Difficulty", form.difficulty || "--"],
+                  ["Live type", form.live_type || "--"],
+                  ["Expected notes", String(getExpectedNotes(selectedSong, form.difficulty) ?? "--")],
+                  ["Current notes", String(form.perfect + form.great + form.good + form.bad + form.miss)],
+                  ["Fast + slow", String(form.fast + form.slow)],
+                ]}
+                emptyLabel="No validation summary."
+              />
+              <div className="stack">
+                {issues.length === 0 ? (
+                  <div className="notice success">No blocking issues detected.</div>
+                ) : (
+                  issues.map((issue) => (
+                    <div key={`${issue.title}-${issue.detail}`} className={issue.tone === "error" ? "notice error" : "notice"}>
+                      <strong>{issue.title}.</strong> {issue.detail}
+                    </div>
+                  ))
+                )}
+              </div>
+              {backendValidation && (
+                <details>
+                  <summary>Validation artifact</summary>
+                  <CodeBlock value={backendValidation} />
+                </details>
+              )}
+            </div>
           </Card>
-          <Card title="Editable scan payload" className="span-2" actions={<button className="button primary" onClick={() => void saveCorrection()}>Save correction</button>}>
-            <textarea className="editor" value={payloadText} onChange={(event) => setPayloadText(event.target.value)} />
+          <Card
+            title="Correction form"
+            className="span-2"
+            actions={
+              <div className="button-row">
+                <button className="button primary" onClick={() => void saveCorrection()} disabled={!canSave}>
+                  Save correction
+                </button>
+              </div>
+            }
+          >
+            <div className="stack">
+              {!canSave && !form.anomaly && <div className="notice error">Fix the highlighted issues before saving, or mark the item as an anomaly.</div>}
+              {form.anomaly && <div className="notice">Anomaly mode is enabled. Save is allowed even if validation still fails.</div>}
+              <div className="layout-two">
+                <div className="field">
+                  <label htmlFor="song_name_from_top_bar_text">Song name</label>
+                  <input
+                    id="song_name_from_top_bar_text"
+                    list="correction-song-options"
+                    value={form.song_name_from_top_bar_text}
+                    onChange={(event) => updateFormField("song_name_from_top_bar_text", event.target.value)}
+                    placeholder="Search and select a song"
+                  />
+                  <datalist id="correction-song-options">
+                    {songMatches.map((song) => (
+                      <option key={song.id} value={correctionSongName(song, user.server)} />
+                    ))}
+                  </datalist>
+                  <div className="inline-meta">Search results: {songMatches.length}</div>
+                  <div className="button-row wrap">
+                    {songMatches.slice(0, 6).map((song) => (
+                      <button key={song.id} className="button ghost" type="button" onClick={() => selectSong(song)}>
+                        {correctionSongName(song, user.server)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="field">
+                  <label htmlFor="difficulty">Difficulty</label>
+                  <select
+                    id="difficulty"
+                    value={form.difficulty}
+                    onChange={(event) => updateFormField("difficulty", event.target.value)}
+                  >
+                    {availableDifficulties.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="layout-two">
+                <div className="field">
+                  <label htmlFor="live_type">Live type</label>
+                  <select id="live_type" value={form.live_type} onChange={(event) => updateFormField("live_type", event.target.value)}>
+                    {CORRECTION_LIVE_TYPES.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="check">
+                  <input
+                    id="anomaly"
+                    type="checkbox"
+                    checked={form.anomaly}
+                    onChange={(event) => updateFormField("anomaly", event.target.checked)}
+                  />
+                  <label htmlFor="anomaly">Mark as anomaly</label>
+                </div>
+              </div>
+
+              <div className="stats-grid">
+                {[
+                  ["perfect", form.perfect],
+                  ["great", form.great],
+                  ["good", form.good],
+                  ["bad", form.bad],
+                  ["miss", form.miss],
+                  ["fast", form.fast],
+                  ["slow", form.slow],
+                  ["max_combo", form.max_combo],
+                  ["score", form.score],
+                  ["high_score", form.high_score],
+                ].map(([field, value]) => (
+                  <div className="field" key={String(field)}>
+                    <label htmlFor={String(field)}>{String(field).replace(/_/g, " ")}</label>
+                    <input
+                      id={String(field)}
+                      type="number"
+                      value={String(value)}
+                      onChange={(event) => updateFormField(field as keyof CorrectionFormState, parseNumber(event.target.value, Number(value)))}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="layout-two">
+                <div className="field">
+                  <label htmlFor="score_rank">Score rank</label>
+                  <input
+                    id="score_rank"
+                    value={form.score_rank}
+                    onChange={(event) => updateFormField("score_rank", event.target.value)}
+                    placeholder="SS, S, A, ..."
+                  />
+                </div>
+                <div className="check">
+                  <input
+                    id="is_new_record"
+                    type="checkbox"
+                    checked={form.is_new_record}
+                    onChange={(event) => updateFormField("is_new_record", event.target.checked)}
+                  />
+                  <label htmlFor="is_new_record">New record</label>
+                </div>
+              </div>
+
+              {advancedMode && (
+                <div className="field">
+                  <label htmlFor="payloadText">Advanced raw JSON</label>
+                  <textarea className="editor" id="payloadText" value={payloadText} onChange={(event) => setPayloadText(event.target.value)} />
+                  {rawJsonError && <div className="notice error">{rawJsonError}</div>}
+                </div>
+              )}
+
+              {!advancedMode && (
+                <details>
+                  <summary>Advanced raw JSON</summary>
+                  <textarea className="editor" value={payloadText} readOnly />
+                </details>
+              )}
+            </div>
           </Card>
         </div>
       )}

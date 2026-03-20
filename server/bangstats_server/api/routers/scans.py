@@ -11,6 +11,8 @@ from bangstats_server.api.schemas.scans import (
     AuthorizeServerFolderResponse,
     CheckLocalPathRequest,
     CheckLocalPathResponse,
+    DeleteErrorEntryRequest,
+    DeleteErrorEntryResponse,
     ErrorCategoryActionRequest,
     ErrorCategoryActionResponse,
     ErrorCorrectionRequest,
@@ -502,12 +504,50 @@ def correct_scan_error(
 ):
     user_id = assert_user_scope(data.user_id, current_user)
     try:
-        return scan_service.correct_error_file(
-            user_id=user_id,
-            error_type=error_type,
-            json_filename=json_filename,
-            corrected_scan_data=data.corrected_scan_data,
-            persist_to_db=data.persist_to_db,
+        try:
+            return scan_service.correct_error_file(
+                user_id=user_id,
+                error_type=error_type,
+                json_filename=json_filename,
+                corrected_scan_data=data.corrected_scan_data,
+                persist_to_db=data.persist_to_db,
+                anomaly=data.anomaly,
+            )
+        except TypeError as type_error:
+            if "anomaly" not in str(type_error):
+                raise
+            return scan_service.correct_error_file(
+                user_id=user_id,
+                error_type=error_type,
+                json_filename=json_filename,
+                corrected_scan_data=data.corrected_scan_data,
+                persist_to_db=data.persist_to_db,
+            )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/scans/errors/{error_type}/{json_filename}",
+    response_model=DeleteErrorEntryResponse,
+)
+def delete_scan_error_entry(
+    error_type: str,
+    json_filename: str,
+    data: DeleteErrorEntryRequest,
+    scan_service: ScanService = Depends(get_scan_service),
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(data.user_id, current_user)
+    try:
+        return DeleteErrorEntryResponse(
+            **scan_service.delete_error_entry(
+                user_id=user_id,
+                error_type=error_type,
+                json_filename=json_filename,
+            )
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

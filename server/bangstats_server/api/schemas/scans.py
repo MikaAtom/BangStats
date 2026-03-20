@@ -138,6 +138,7 @@ class ErrorCorrectionRequest(BaseModel):
     user_id: int
     corrected_scan_data: Dict[str, Any]
     persist_to_db: bool = True
+    anomaly: bool = False
 
 
 class ErrorCorrectionResponse(BaseModel):
@@ -147,6 +148,17 @@ class ErrorCorrectionResponse(BaseModel):
     persisted: bool
     skipped_duplicates: bool
     failed_to_persist: bool
+    saved_as_anomaly: bool = False
+
+
+class DeleteErrorEntryRequest(BaseModel):
+    user_id: int
+
+
+class DeleteErrorEntryResponse(BaseModel):
+    deleted: bool
+    removed_db_rows: int = 0
+    image_filename: str | None = None
 
 
 class ErrorCategoryActionRequest(BaseModel):

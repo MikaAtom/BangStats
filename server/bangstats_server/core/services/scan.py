@@ -388,6 +388,12 @@ class ScanService:
     def _canonical_image_filename(self, source_filename: str) -> str:
         return f"{Path(source_filename).stem}.png"
 
+    def _resolve_error_image_filename(self, error_type: str, json_filename: str) -> str:
+        preserved_image_path = self._find_error_image_path(error_type, json_filename)
+        if preserved_image_path is not None:
+            return preserved_image_path.name
+        return self._canonical_image_filename(json_filename)
+
     def _list_error_json_paths(self, error_type: str) -> List[Path]:
         error_dir = Path(self.cache_errors) / error_type
         if not error_dir.exists() or not error_dir.is_dir():
@@ -526,6 +532,7 @@ class ScanService:
     def get_error_detail(self, error_type: str, json_filename: str) -> Dict[str, Any]:
         json_path = self._resolve_error_json_path(error_type, json_filename)
         validation_path = json_path.with_name(f"{json_path.stem}.validation.json")
+        image_filename = self._resolve_error_image_filename(error_type, json_path.name)
 
         with open(json_path, "r", encoding="utf-8") as fh:
             scan_data = json.load(fh)
@@ -538,7 +545,7 @@ class ScanService:
         return {
             "error_type": error_type,
             "json_filename": json_path.name,
-            "image_filename": self._canonical_image_filename(json_path.name),
+            "image_filename": image_filename,
             "scan_data": scan_data,
             "validation": validation_data,
         }
@@ -551,28 +558,21 @@ class ScanService:
         json_filename: str,
         corrected_scan_data: Dict[str, Any],
         persist_to_db: bool = True,
+        anomaly: bool = False,
     ) -> Dict[str, Any]:
         json_path = self._resolve_error_json_path(error_type, json_filename)
-        canonical_filename = self._canonical_image_filename(json_path.name)
+        canonical_filename = self._resolve_error_image_filename(error_type, json_path.name)
         preserved_image_path = self._find_error_image_path(error_type, json_path.name)
         validation_output = self.validation_service.validate(canonical_filename, corrected_scan_data)
         new_error_type = self._extract_error_type(validation_output)
-
-        # Remove stale entry before rewriting it to the latest category.
-        self._remove_error_entry(error_type, json_path.name)
-        target_folder = self._store_result(
-            filename=canonical_filename,
-            image_path=str(preserved_image_path) if preserved_image_path else None,
-            scan_result=corrected_scan_data,
-            error_type=new_error_type,
-        )
-        self._store_validation_artifact(canonical_filename, target_folder, validation_output)
+        resolved_song_id = self._extract_resolved_song_id(validation_output)
+        saved_as_anomaly = bool(anomaly and persist_to_db and resolved_song_id is not None)
+        stored_error_type = None if saved_as_anomaly else new_error_type
 
         persisted = False
         skipped_duplicate = False
         failed_to_persist = False
-        resolved_song_id = self._extract_resolved_song_id(validation_output)
-        if new_error_type is None and persist_to_db:
+        if persist_to_db and (new_error_type is None or saved_as_anomaly):
             if resolved_song_id is None:
                 failed_to_persist = True
             else:
@@ -581,10 +581,12 @@ class ScanService:
                     payload = self._build_screenshot_payload(
                         user_id=user_id,
                         filename=canonical_filename,
-                        scan_result=corrected_scan_data,
+                        scan_result={**corrected_scan_data, "anomaly": bool(anomaly)},
                         resolved_song_id=resolved_song_id,
                         timestamp_ms=timestamp_ms,
                     )
+                    if anomaly:
+                        payload["anomaly"] = True
                     created = self.screenshot_service.create_screenshot(payload)
                     if created is None:
                         skipped_duplicate = True
@@ -593,13 +595,41 @@ class ScanService:
                 except Exception:
                     failed_to_persist = True
 
+        # Remove stale entry before rewriting it to the latest category.
+        self._remove_error_entry(error_type, json_path.name)
+        target_folder = self._store_result(
+            filename=canonical_filename,
+            image_path=str(preserved_image_path) if preserved_image_path else None,
+            scan_result=corrected_scan_data,
+            error_type=stored_error_type,
+        )
+        self._store_validation_artifact(canonical_filename, target_folder, validation_output)
+
         return {
             "image_filename": canonical_filename,
             "is_valid": new_error_type is None,
-            "error_type": new_error_type,
+            "error_type": stored_error_type,
             "persisted": persisted,
             "skipped_duplicates": skipped_duplicate,
             "failed_to_persist": failed_to_persist,
+            "saved_as_anomaly": saved_as_anomaly,
+        }
+
+    def delete_error_entry(self, *, user_id: int, error_type: str, json_filename: str) -> Dict[str, Any]:
+        json_path = self._resolve_error_json_path(error_type, json_filename)
+        image_filename = self._resolve_error_image_filename(error_type, json_path.name)
+        preserved_image_path = self._find_error_image_path(error_type, json_path.name)
+
+        candidate_filenames = [image_filename, self._canonical_image_filename(json_path.name)]
+        if preserved_image_path is not None:
+            candidate_filenames.append(preserved_image_path.name)
+
+        removed_db_rows = self.screenshot_service.delete_screenshots_by_filenames(user_id, candidate_filenames)
+        self._remove_error_entry(error_type, json_path.name)
+        return {
+            "deleted": True,
+            "removed_db_rows": removed_db_rows,
+            "image_filename": image_filename,
         }
 
     def revalidate_error_category(
@@ -630,7 +660,7 @@ class ScanService:
                 )
                 continue
 
-            image_filename = self._canonical_image_filename(json_path.name)
+            image_filename = self._resolve_error_image_filename(error_type, json_path.name)
             preserved_image_path = self._find_error_image_path(error_type, json_path.name)
             validation_output = self.validation_service.validate(image_filename, payload)
             new_error_type = self._extract_error_type(validation_output)
@@ -685,7 +715,7 @@ class ScanService:
         selected_model = model or self.default_model
 
         for json_path in json_files:
-            image_filename = self._canonical_image_filename(json_path.name)
+            image_filename = self._resolve_error_image_filename(error_type, json_path.name)
             image_path = self._find_error_image_path(error_type, json_path.name)
             if image_path is None:
                 results["processed"] += 1

@@ -429,6 +429,28 @@ def test_import_json_folder_canonicalizes_filename_and_persists(tmp_path: Path):
     ).exists()
 
 
+def test_resolve_error_image_filename_prefers_actual_extension(tmp_path: Path):
+    scan_service = ScanService.__new__(ScanService)
+    scan_service.cache_errors = tmp_path / "errors"
+    note_dir = scan_service.cache_errors / "note_errors"
+    note_dir.mkdir(parents=True, exist_ok=True)
+
+    json_name = "Screenshot_20201120-205836_BanG Dream!.json"
+    (note_dir / json_name).write_text("{}", encoding="utf-8")
+    (note_dir / "Screenshot_20201120-205836_BanG Dream!.jpg").write_text(
+        "fake image",
+        encoding="utf-8",
+    )
+
+    resolved = ScanService._resolve_error_image_filename(
+        scan_service,
+        "note_errors",
+        json_name,
+    )
+
+    assert resolved == "Screenshot_20201120-205836_BanG Dream!.jpg"
+
+
 def test_split_image_list_balances_chunks():
     scan_service = ScanService.__new__(ScanService)
     chunks = scan_service._split_image_list(

@@ -120,6 +120,24 @@ export type ErrorCorrectionResponse = {
   persisted: boolean;
   skipped_duplicates: boolean;
   failed_to_persist: boolean;
+  saved_as_anomaly?: boolean;
+};
+
+export type DeleteErrorEntryResponse = {
+  deleted: boolean;
+  removed_db_rows: number;
+  image_filename?: string | null;
+};
+
+export type ReferenceSongItem = {
+  id: number;
+  internal_song_id: number;
+  tag: string;
+  name: Record<string, string>;
+  note_counts: Record<string, number[]>;
+  special?: Record<string, unknown> | null;
+  levels?: Record<string, number[]>;
+  band_id?: number;
 };
 
 export type ErrorCategoryActionResponse = {
@@ -862,11 +880,21 @@ class ApiClient {
     return this.request<ErrorDetail>(`/api/scans/errors/${encodeURIComponent(errorType)}/${encodeURIComponent(jsonFilename)}`);
   }
 
-  correctError(errorType: string, jsonFilename: string, payload: { user_id: number; corrected_scan_data: Record<string, unknown>; persist_to_db: boolean }) {
+  correctError(errorType: string, jsonFilename: string, payload: { user_id: number; corrected_scan_data: Record<string, unknown>; persist_to_db: boolean; anomaly?: boolean }) {
     return this.request<ErrorCorrectionResponse>(
       `/api/scans/errors/${encodeURIComponent(errorType)}/${encodeURIComponent(jsonFilename)}/correct`,
       {
         method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  deleteError(errorType: string, jsonFilename: string, payload: { user_id: number }) {
+    return this.request<DeleteErrorEntryResponse>(
+      `/api/scans/errors/${encodeURIComponent(errorType)}/${encodeURIComponent(jsonFilename)}`,
+      {
+        method: "DELETE",
         body: JSON.stringify(payload),
       },
     );
@@ -897,6 +925,10 @@ class ApiClient {
     return this.request<SongSearchResponse>(
       `/api/users/${userId}/stats/songs/search?q=${encodeURIComponent(q)}&server=${server}`,
     );
+  }
+
+  getReferenceSongs(sinceId = 0, limit = 5000) {
+    return this.request<{ max_id: number; items: ReferenceSongItem[] }>(`/api/reference/songs?since_id=${sinceId}&limit=${limit}`);
   }
 
   getSongStats(userId: number, songId: number, difficulty?: string) {

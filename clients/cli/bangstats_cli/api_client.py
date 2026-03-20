@@ -414,6 +414,7 @@ class BangStatsAPI:
         json_filename: str,
         corrected_scan_data: dict[str, Any],
         persist_to_db: bool = True,
+        anomaly: bool = False,
     ) -> dict[str, Any]:
         response = self._client.post(
             f"/api/scans/errors/{error_type}/{json_filename}/correct",
@@ -421,7 +422,22 @@ class BangStatsAPI:
                 "user_id": user_id,
                 "corrected_scan_data": corrected_scan_data,
                 "persist_to_db": persist_to_db,
+                "anomaly": anomaly,
             },
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def delete_scan_error(
+        self,
+        *,
+        user_id: int,
+        error_type: str,
+        json_filename: str,
+    ) -> dict[str, Any]:
+        response = self._client.delete(
+            f"/api/scans/errors/{error_type}/{json_filename}",
+            json={"user_id": user_id},
         )
         response.raise_for_status()
         return response.json()

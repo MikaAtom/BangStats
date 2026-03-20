@@ -23,6 +23,7 @@ EDITABLE_SCAN_FIELDS = [
     "high_score",
     "score_rank",
     "is_new_record",
+    "anomaly",
 ]
 
 
@@ -737,34 +738,65 @@ def error_correction_menu(api: BangStatsAPI, user: dict) -> None:
             print(f"Failed to load error detail: {exc}")
             continue
 
-        print(f"\nSelected: {detail.get('json_filename')}")
-        validation = detail.get("validation") or {}
-        print(f"Current error type: {validation.get('error_type', detail.get('error_type'))}")
-        if validation.get("reasons"):
-            print(f"Reasons: {', '.join(validation.get('reasons', []))}")
-        edited_payload = _edit_scan_payload(detail.get("scan_data", {}))
-        if edited_payload == detail.get("scan_data", {}):
-            print("No changes submitted.")
-            continue
+        while True:
+            print(f"\nSelected: {detail.get('json_filename')}")
+            validation = detail.get("validation") or {}
+            print(f"Current error type: {validation.get('error_type', detail.get('error_type'))}")
+            if validation.get("reasons"):
+                print(f"Reasons: {', '.join(validation.get('reasons', []))}")
+            print("1. Edit and submit correction")
+            print("2. Delete this error")
+            print("0. Back")
+            file_action = input("Choose action: ").strip()
+            if file_action == "0":
+                break
+            if file_action == "2":
+                confirm = input("Really delete this error entry? (y/N): ").strip().lower()
+                if confirm not in {"y", "yes"}:
+                    print("Delete cancelled.")
+                    continue
+                try:
+                    outcome = api.delete_scan_error(
+                        user_id=int(user["id"]),
+                        error_type=error_type,
+                        json_filename=json_filename,
+                    )
+                except Exception as exc:
+                    print(f"Delete failed: {exc}")
+                    continue
+                print(f"Deleted error entry. Removed DB rows: {outcome.get('removed_db_rows', 0)}")
+                break
+            if file_action != "1":
+                print("Invalid choice.")
+                continue
 
-        try:
-            outcome = api.correct_scan_error(
-                user_id=int(user["id"]),
-                error_type=error_type,
-                json_filename=json_filename,
-                corrected_scan_data=edited_payload,
-                persist_to_db=True,
-            )
-        except Exception as exc:
-            print(f"Correction failed: {exc}")
-            continue
+            edited_payload = _edit_scan_payload(detail.get("scan_data", {}))
+            if edited_payload == detail.get("scan_data", {}):
+                print("No changes submitted.")
+                continue
 
-        print("Correction processed:")
-        print(f"  Valid now: {outcome.get('is_valid')}")
-        print(f"  New error type: {outcome.get('error_type')}")
-        print(f"  Persisted: {outcome.get('persisted')}")
-        print(f"  Skipped duplicate: {outcome.get('skipped_duplicates')}")
-        print(f"  Failed to persist: {outcome.get('failed_to_persist')}")
+            anomaly_value = bool(edited_payload.get("anomaly", False))
+            try:
+                outcome = api.correct_scan_error(
+                    user_id=int(user["id"]),
+                    error_type=error_type,
+                    json_filename=json_filename,
+                    corrected_scan_data=edited_payload,
+                    persist_to_db=True,
+                    anomaly=anomaly_value,
+                )
+            except Exception as exc:
+                print(f"Correction failed: {exc}")
+                continue
+
+            print("Correction processed:")
+            print(f"  Valid now: {outcome.get('is_valid')}")
+            print(f"  New error type: {outcome.get('error_type')}")
+            print(f"  Saved as anomaly: {outcome.get('saved_as_anomaly')}")
+            print(f"  Persisted: {outcome.get('persisted')}")
+            print(f"  Skipped duplicate: {outcome.get('skipped_duplicates')}")
+            print(f"  Failed to persist: {outcome.get('failed_to_persist')}")
+            break
 
 
 def _format_play_meta(meta: dict[str, Any] | None) -> str:

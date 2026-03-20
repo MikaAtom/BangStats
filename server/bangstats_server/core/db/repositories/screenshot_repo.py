@@ -167,6 +167,29 @@ class ScreenshotRepository:
             self._session.rollback()
             return False, f"Database error: {e}"
 
+    def delete_by_user_and_filenames(self, user_id: int, filenames: List[str]) -> int:
+        if not isinstance(user_id, int) or user_id <= 0:
+            return 0
+        sanitized = sorted({name for name in filenames if isinstance(name, str) and name.strip()})
+        if not sanitized:
+            return 0
+
+        try:
+            statement = select(Screenshot).where(
+                Screenshot.user_id == user_id,
+                Screenshot.filename.in_(sanitized),
+            )
+            rows = self._session.exec(statement).all()
+            if not rows:
+                return 0
+            for row in rows:
+                self._session.delete(row)
+            self._session.commit()
+            return len(rows)
+        except Exception:
+            self._session.rollback()
+            return 0
+
     def get_by_difficulty(self, user_id: int, difficulty: str) -> List[Screenshot]:
         """Retrieve all screenshots for a specific user and difficulty."""
         if not isinstance(user_id, int) or user_id <= 0:

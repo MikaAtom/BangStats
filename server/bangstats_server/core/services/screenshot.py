@@ -254,6 +254,13 @@ class ScreenshotService:
         logger.debug(f"Screenshot {screenshot_id} deleted successfully")
         return True
 
+    def delete_screenshots_by_filenames(self, user_id: int, filenames: List[str]) -> int:
+        if not isinstance(user_id, int) or user_id <= 0:
+            return 0
+        if not filenames:
+            return 0
+        return self._repo.delete_by_user_and_filenames(user_id, filenames)
+
     def get_screenshots_by_difficulty(
         self, user_id: int, difficulty: Optional[str] = None
     ) -> List[Screenshot]:

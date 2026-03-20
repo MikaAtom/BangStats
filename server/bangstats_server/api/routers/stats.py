@@ -92,6 +92,21 @@ def _search_songs_case_insensitive(query: str) -> list:
     return list(merged.values())
 
 
+def _songs_by_internal_ids(song_service: SongService, song_ids: Iterable[int]) -> list:
+    sanitized = sorted({int(song_id) for song_id in song_ids if int(song_id) > 0})
+    if not sanitized:
+        return []
+    if hasattr(song_service, "get_songs_by_internal_ids"):
+        return song_service.get_songs_by_internal_ids(sanitized)
+    if hasattr(song_service, "get_song_by_internal_id"):
+        return [song_service.get_song_by_internal_id(song_id) for song_id in sanitized]
+    if hasattr(song_service, "get_all_songs"):
+        all_songs = song_service.get_all_songs()
+        by_id = {int(song.internal_song_id): song for song in all_songs}
+        return [by_id.get(song_id) for song_id in sanitized if by_id.get(song_id) is not None]
+    return []
+
+
 def _difficulty_sort_key(difficulty: str) -> tuple[int, str]:
     order = {"easy": 0, "normal": 1, "hard": 2, "expert": 3, "special": 4}
     lowered = difficulty.lower()
@@ -186,10 +201,7 @@ def _song_names_for_ids(song_service: SongService, server: str, song_ids: Iterab
     sanitized = sorted({int(song_id) for song_id in song_ids if int(song_id) > 0})
     if not sanitized:
         return {}
-    if hasattr(song_service, "get_songs_by_internal_ids"):
-        songs = song_service.get_songs_by_internal_ids(sanitized)
-    else:
-        songs = [song_service.get_song_by_internal_id(song_id) for song_id in sanitized]
+    songs = _songs_by_internal_ids(song_service, sanitized)
     by_id = {int(song.internal_song_id): song for song in songs}
     return {
         song_id: _song_display_name(by_id.get(song_id), server, fallback_id=song_id)
@@ -616,7 +628,7 @@ def get_user_stats_insights(
         for screenshot in screenshots
         if int(getattr(screenshot, "song_id", 0)) > 0
     }
-    song_map = {int(song.internal_song_id): song for song in song_service.get_songs_by_internal_ids(list(song_ids))}
+    song_map = {int(song.internal_song_id): song for song in _songs_by_internal_ids(song_service, list(song_ids))}
     song_lengths_seconds = {
         song_id: _song_length_seconds(song)
         for song_id, song in song_map.items()
