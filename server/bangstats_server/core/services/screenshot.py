@@ -24,7 +24,14 @@ class ScreenshotService:
 
         if song_id:
             song = self._song_service.get_song_by_internal_id(song_id)
-            if song and song.special and song.special.get("available", False):
+            special_payload = song.special if song else None
+            has_special = False
+            if isinstance(special_payload, dict):
+                has_special = bool(special_payload.get("available", False))
+            elif isinstance(special_payload, bool):
+                has_special = special_payload
+
+            if has_special:
                 return base_difficulties + ["special"]
 
         return base_difficulties

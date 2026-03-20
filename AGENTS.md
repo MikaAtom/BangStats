@@ -14,3 +14,7 @@
 ## Web UI expectations
 - The web app should cover the full operational surface of the CLI.
 - Visual additions such as screenshot viewers, charts, and calendars are allowed on top of parity, but they must not replace existing CLI workflows.
+
+## Python tooling
+- Use `uv` for Python execution, tests, and tooling commands (for example, `uv run pytest -q`).
+- Do not rely on manual `.venv` activation in agent instructions or runbooks.

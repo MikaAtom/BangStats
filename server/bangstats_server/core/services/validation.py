@@ -196,7 +196,14 @@ class ValidationService:
             return None, []
 
         reasons: List[str] = []
-        expected = song.note_counts.get(difficulty) if song.note_counts else None
+        expected_raw = song.note_counts.get(difficulty) if song.note_counts else None
+        expected = None
+        if isinstance(expected_raw, list):
+            if expected_raw:
+                expected = expected_raw[0]
+        elif isinstance(expected_raw, int):
+            expected = expected_raw
+
         if expected and total_notes != expected:
             if not (
                 song_name == "romeo"
