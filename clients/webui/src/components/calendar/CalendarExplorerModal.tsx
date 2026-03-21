@@ -4,7 +4,7 @@ import type { ScreenshotListResponse } from "../../api";
 import type { Loadable } from "../../hooks/useLoadable";
 import { formatShortDate, webLocale } from "../../utils/format";
 import { EmptyState } from "../ui/EmptyState";
-import { LoadingInline } from "../ui/LoadingCard";
+import { LoadingSpinner } from "../ui/LoadingCard";
 import { ScreenshotModal, type ScreenshotModalItem } from "../screenshots/ScreenshotModal";
 import { CalendarHourGrid } from "./CalendarHourGrid";
 
@@ -294,9 +294,11 @@ export function CalendarExplorerModal({
   monthState,
   shotsState,
   eventRange = null,
-  headerCenter = null,
   secondaryControls = null,
   secondaryControlsCount = 0,
+  onStepEvent,
+  canStepEventBackward = false,
+  canStepEventForward = false,
   variant = "modal",
 }: {
   open: boolean;
@@ -311,9 +313,11 @@ export function CalendarExplorerModal({
   monthState: Loadable<CalendarResponse> & { reload: () => Promise<void> };
   shotsState: Loadable<ScreenshotListResponse> & { reload: () => Promise<void> };
   eventRange?: { from_date: string; to_date: string } | null;
-  headerCenter?: ReactNode;
   secondaryControls?: ReactNode;
   secondaryControlsCount?: number;
+  onStepEvent?: (direction: -1 | 1) => void;
+  canStepEventBackward?: boolean;
+  canStepEventForward?: boolean;
   variant?: "modal" | "inline";
 }) {
   const [shotModalIndex, setShotModalIndex] = useState<number | null>(null);
@@ -346,7 +350,7 @@ export function CalendarExplorerModal({
   const showShotError = !shotsIdle && Boolean(shotsState.error);
   const showHourGrid = !shotsIdle && !shotsState.error && orderedShots.length > 0;
   const showShotEmpty = !shotsIdle && !shotsState.loading && !shotsState.error && orderedShots.length === 0;
-  const metaLine = [rangeLabel, !shotsIdle && orderedShots.length ? `${orderedShots.length} screenshots` : null].filter(Boolean).join(" · ");
+  const screenshotCountLabel = !shotsIdle && shotsState.data ? `${shotsState.data.total || orderedShots.length} screenshots` : "";
 
   if (!open) return null;
 
@@ -360,8 +364,11 @@ export function CalendarExplorerModal({
       <div className="modal-header calendar-modal__header">
         <div className="calendar-modal__toprow">
           <div className="calendar-modal__heading">
-          <h3>{title}</h3>
-            <div className="inline-meta">{metaLine}</div>
+            <h3>{title}</h3>
+            <div className="calendar-modal__meta">
+              <span className="inline-meta calendar-modal__meta-range">{rangeLabel}</span>
+              <span className="inline-meta calendar-modal__meta-count">{screenshotCountLabel}</span>
+            </div>
           </div>
           <div className="calendar-modal__toolbar">
             <div className="calendar-modal__mode">
@@ -378,21 +385,32 @@ export function CalendarExplorerModal({
               <button
                 className="button ghost"
                 type="button"
-                disabled={mode === "event"}
-                onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, -1))}
+                disabled={mode === "event" ? !canStepEventBackward : false}
+                onClick={() => {
+                  if (mode === "event") {
+                    onStepEvent?.(-1);
+                    return;
+                  }
+                  onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, -1));
+                }}
               >
                 Prev
               </button>
               <button
                 className="button ghost"
                 type="button"
-                disabled={mode === "event"}
-                onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, 1))}
+                disabled={mode === "event" ? !canStepEventForward : false}
+                onClick={() => {
+                  if (mode === "event") {
+                    onStepEvent?.(1);
+                    return;
+                  }
+                  onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, 1));
+                }}
               >
                 Next
               </button>
             </div>
-            <div className="calendar-modal__focus">{headerCenter}</div>
             {secondaryControls ? (
               <button className="button ghost calendar-modal__filter-toggle" type="button" onClick={() => setFiltersOpen((current) => !current)}>
                 Filters{secondaryControlsCount > 0 ? ` (${secondaryControlsCount})` : ""}
@@ -414,7 +432,7 @@ export function CalendarExplorerModal({
 
       <div className="calendar-modal__layout">
         <div className="calendar-modal__browser">
-          {mode === "year" && yearState.loading ? <LoadingInline /> : null}
+          {mode === "year" && yearState.loading ? <LoadingSpinner centered /> : null}
           {mode === "year" && yearState.error ? (
             <div className="stack">
               <EmptyState text={`Could not load yearly calendar: ${yearState.error}`} />
@@ -452,7 +470,7 @@ export function CalendarExplorerModal({
               })()
             : null}
 
-          {mode === "month" && monthState.loading ? <LoadingInline /> : null}
+          {mode === "month" && monthState.loading ? <LoadingSpinner centered /> : null}
           {mode === "month" && monthState.error ? (
             <div className="stack">
               <EmptyState text={`Could not load monthly calendar: ${monthState.error}`} />
@@ -473,7 +491,7 @@ export function CalendarExplorerModal({
           ) : null}
 
           {mode === "event" && !eventRangeReady ? <EmptyState text="Pick an event in the center field to load Event mode." /> : null}
-          {showShotListLoading ? <LoadingInline /> : null}
+          {showShotListLoading ? <LoadingSpinner centered /> : null}
           {showShotError ? (
             <div className="stack">
               <EmptyState text={`Could not load screenshots: ${shotsState.error}`} />

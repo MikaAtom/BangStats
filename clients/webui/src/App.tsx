@@ -1898,6 +1898,9 @@ function CalendarAnalyticsView() {
     keywords: String(event.event_id || event.id || ""),
   }));
   const selectedEventOption = eventOptions.find((option) => option.value === selectedEventId) || null;
+  const selectedEventIndex = selectedEventId ? eventOptions.findIndex((option) => option.value === selectedEventId) : -1;
+  const olderEventOption = selectedEventIndex >= 0 ? eventOptions[selectedEventIndex + 1] || null : null;
+  const newerEventOption = selectedEventIndex > 0 ? eventOptions[selectedEventIndex - 1] || null : null;
   const songOptions: SearchableSelectOption[] = songCatalog.items
     .filter((song) => {
       const query = songSearch.trim().toLowerCase();
@@ -1911,12 +1914,42 @@ function CalendarAnalyticsView() {
       meta: `Song #${song.internal_song_id}`,
     }));
 
-  const activeSecondaryFilterCount = [filters.difficulty, filters.liveType, filters.includeMeta ? "meta" : ""].filter(Boolean).length;
+  const songFilterControl = (
+    <SearchableSelect
+      className="calendar-modal__search calendar-modal__search--filter"
+      label="Song"
+      placeholder="Filter by song"
+      value={selectedSong}
+      searchText={songSearch}
+      options={songOptions}
+      loading={songCatalog.loading}
+      loadingMore={songCatalog.loadingMore}
+      hasMore={!songCatalog.exhausted}
+      emptyText="No songs match this search."
+      onSearchTextChange={setSongSearch}
+      onOpenChange={(open) => {
+        if (open && !songCatalog.initialized) void loadSongChunk("initial");
+      }}
+      onReachEnd={() => {
+        if (!songCatalog.initialized) return;
+        void loadSongChunk("more");
+      }}
+      onChange={(option) => {
+        if (!option) {
+          setSelectedSong(null);
+          setSongSearch("");
+          return;
+        }
+        setSelectedSong(option);
+        setSongSearch("");
+      }}
+    />
+  );
 
-  const centerControl =
+  const eventFilterControl =
     mode === "event" ? (
       <SearchableSelect
-        className="calendar-modal__search"
+        className="calendar-modal__search calendar-modal__search--filter"
         label="Event"
         placeholder="Select an event"
         value={selectedEventOption}
@@ -1930,37 +1963,19 @@ function CalendarAnalyticsView() {
           setEventSearch("");
         }}
       />
-    ) : (
-      <SearchableSelect
-        className="calendar-modal__search"
-        label="Song"
-        placeholder="Filter by song"
-        value={selectedSong}
-        searchText={songSearch}
-        options={songOptions}
-        loading={songCatalog.loading}
-        loadingMore={songCatalog.loadingMore}
-        hasMore={!songCatalog.exhausted}
-        emptyText="No songs match this search."
-        onSearchTextChange={setSongSearch}
-        onOpenChange={(open) => {
-          if (open && !songCatalog.initialized) void loadSongChunk("initial");
-        }}
-        onReachEnd={() => {
-          if (!songCatalog.initialized) return;
-          void loadSongChunk("more");
-        }}
-        onChange={(option) => {
-          if (!option) {
-            setSelectedSong(null);
-            setSongSearch("");
-            return;
-          }
-          setSelectedSong(option);
-          setSongSearch("");
-        }}
-      />
-    );
+    ) : null;
+
+  const activeSecondaryFilterCount = [filters.difficulty, filters.liveType, filters.includeMeta ? "meta" : "", selectedSong ? "song" : "", mode === "event" && selectedEventId ? "event" : ""]
+    .filter(Boolean)
+    .length;
+
+  const secondaryControls = (
+    <>
+      {songFilterControl}
+      {eventFilterControl}
+      <SectionFilterControls filters={filters} onChange={setFilters} />
+    </>
+  );
 
   return (
     <CalendarExplorerModal
@@ -1977,8 +1992,16 @@ function CalendarAnalyticsView() {
       monthState={calendarMonth}
       shotsState={calendarShots}
       eventRange={calendarEventWindow}
-      headerCenter={centerControl}
-      secondaryControls={<SectionFilterControls filters={filters} onChange={setFilters} />}
+      onStepEvent={(direction) => {
+        const next = direction < 0 ? olderEventOption : newerEventOption;
+        if (next) {
+          setSelectedEventId(next.value);
+          setEventSearch("");
+        }
+      }}
+      canStepEventBackward={Boolean(olderEventOption)}
+      canStepEventForward={Boolean(newerEventOption)}
+      secondaryControls={secondaryControls}
       secondaryControlsCount={activeSecondaryFilterCount}
     />
   );
