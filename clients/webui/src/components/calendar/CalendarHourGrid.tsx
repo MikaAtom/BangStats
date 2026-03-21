@@ -1,7 +1,6 @@
 import { Fragment, useMemo } from "react";
 import type { ScreenshotItem, User } from "../../api";
-import { webLocale } from "../../utils/format";
-import { SecureImage } from "../ui/SecureImage";
+import { formatDifficulty, webLocale } from "../../utils/format";
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
@@ -54,6 +53,18 @@ function formatDayHeader(dayKey: string, server: User["server"]) {
   return d.toLocaleDateString(webLocale(server), { weekday: "short", month: "numeric", day: "numeric" });
 }
 
+function formatAccuracyPct(accuracy: number) {
+  const n = Number(accuracy);
+  if (!Number.isFinite(n)) return "—";
+  return `${n % 1 === 0 ? String(Math.round(n)) : n.toFixed(1)}%`;
+}
+
+function FcApRibbon({ shot }: { shot: ScreenshotItem }) {
+  if (shot.all_perfect) return <span className="badge ap calendar-hour-grid__ribbon">AP</span>;
+  if (shot.full_combo) return <span className="badge fc calendar-hour-grid__ribbon">FC</span>;
+  return null;
+}
+
 export function CalendarHourGrid({
   from_date,
   to_date,
@@ -88,30 +99,35 @@ export function CalendarHourGrid({
 
   const n = dayKeys.length;
   const gridStyle = {
-    gridTemplateColumns: `3.35rem repeat(${n}, minmax(76px, 1fr))`,
-    gridTemplateRows: `auto auto repeat(24, minmax(42px, auto))`,
+    gridTemplateColumns: `3.35rem repeat(${n}, minmax(88px, 1fr))`,
+    gridTemplateRows: `auto auto repeat(24, minmax(36px, auto))`,
   };
 
-  function renderThumbs(bucketKey: string) {
+  function renderEntries(bucketKey: string) {
     const list = buckets.get(bucketKey) || [];
     if (!list.length) return <div className="calendar-hour-grid__cell-inner" />;
     return (
       <div className="calendar-hour-grid__cell-inner">
-        {list.map((shot) => (
-          <button
-            key={shot.id}
-            type="button"
-            className="calendar-hour-grid__thumb"
-            title={shot.song_name || `Song ${shot.song_id}`}
-            onClick={() => onShotClick(shot)}
-          >
-            {shot.image_available && shot.image_url ? (
-              <SecureImage path={shot.image_url} alt={shot.filename || shot.song_name || `screenshot-${shot.id}`} variant="thumb" />
-            ) : (
-              <div className="calendar-hour-grid__thumb-placeholder">No img</div>
-            )}
-          </button>
-        ))}
+        {list.map((shot) => {
+          const title = shot.song_name || `Song ${shot.song_id}`;
+          return (
+            <button
+              key={shot.id}
+              type="button"
+              className="calendar-hour-grid__entry"
+              title={title}
+              onClick={() => onShotClick(shot)}
+            >
+              <div className="calendar-hour-grid__entry-top">
+                <span className="calendar-hour-grid__entry-meta">
+                  {formatDifficulty(shot.difficulty)} · {formatAccuracyPct(shot.accuracy)}
+                </span>
+                <FcApRibbon shot={shot} />
+              </div>
+              <span className="calendar-hour-grid__entry-song">{title}</span>
+            </button>
+          );
+        })}
       </div>
     );
   }
@@ -132,7 +148,7 @@ export function CalendarHourGrid({
         </div>
         {dayKeys.map((d, i) => (
           <div key={`ad-${d}`} className="calendar-hour-grid__cell" style={{ gridColumn: i + 2, gridRow: 2 }}>
-            {renderThumbs(`${d}:allday`)}
+            {renderEntries(`${d}:allday`)}
           </div>
         ))}
         {HOURS.map((hour) => (
@@ -142,7 +158,7 @@ export function CalendarHourGrid({
             </div>
             {dayKeys.map((d, i) => (
               <div key={`${d}-${hour}`} className="calendar-hour-grid__cell" style={{ gridColumn: i + 2, gridRow: hour + 3 }}>
-                {renderThumbs(`${d}:${hour}`)}
+                {renderEntries(`${d}:${hour}`)}
               </div>
             ))}
           </Fragment>

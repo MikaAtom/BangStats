@@ -1865,20 +1865,31 @@ function RecapAnalyticsView() {
     [auth.user?.id, scope, selectedEventId, filters.difficulty, filters.liveType, filters.includeMeta],
   );
 
-  const recapCalendarEventRange =
-    scope === "event" && recapEvent.data
-      ? { from_date: recapEvent.data.from_date, to_date: recapEvent.data.to_date }
+  const eventStats = useLoadable<EventStatsResponse>(
+    auth.user && scope === "event" && Boolean(selectedEventId)
+      ? () => api.getEventStats(auth.user!.id, Number(selectedEventId), filterQuery)
+      : null,
+    [auth.user?.id, scope, selectedEventId, filters.difficulty, filters.liveType, filters.includeMeta],
+  );
+
+  /** Event date window for calendar + screenshots (recap or event-stats; recap can lag behind stats). */
+  const recapEventWindow =
+    scope === "event" && selectedEventId
+      ? recapEvent.data
+        ? { from_date: recapEvent.data.from_date, to_date: recapEvent.data.to_date }
+        : eventStats.data
+          ? { from_date: eventStats.data.from_date, to_date: eventStats.data.to_date }
+          : null
       : null;
 
-  const recapExplorerRange = scope === "event" && recapEvent.data
-    ? { from_date: recapEvent.data.from_date, to_date: recapEvent.data.to_date }
-    : calendarRangeForMode(calendarMode, anchorDate, recapCalendarEventRange);
+  const recapScreenshotRange =
+    recapEventWindow ?? (scope === "event" && selectedEventId ? null : calendarRangeForMode(calendarMode, anchorDate, null));
 
   useEffect(() => {
-    if (calendarMode === "event" && !recapCalendarEventRange) {
+    if (calendarMode === "event" && !recapEventWindow) {
       setCalendarMode("month");
     }
-  }, [calendarMode, recapCalendarEventRange]);
+  }, [calendarMode, recapEventWindow]);
 
   const recapCalendarMonth = useLoadable<CalendarResponse>(
     auth.user && calendarOpen && (calendarMode === "month" || calendarMode === "week" || calendarMode === "day")
@@ -1893,11 +1904,11 @@ function RecapAnalyticsView() {
   );
 
   const recapCalendarShots = useLoadable(
-    auth.user && calendarOpen && calendarMode !== "year"
+    auth.user && calendarOpen && calendarMode !== "year" && recapScreenshotRange
       ? () =>
           api.listScreenshots(auth.user!.id, {
             ...filterQuery,
-            ...recapExplorerRange,
+            ...recapScreenshotRange,
             limit: calendarMode === "day" ? 80 : 200,
             offset: 0,
             sort_by: "timestamp",
@@ -1911,26 +1922,20 @@ function RecapAnalyticsView() {
       anchorDate.getFullYear(),
       anchorDate.getMonth(),
       anchorDate.getDate(),
-      recapExplorerRange.from_date,
-      recapExplorerRange.to_date,
+      recapScreenshotRange?.from_date,
+      recapScreenshotRange?.to_date,
       filters.difficulty,
       filters.liveType,
       filters.includeMeta,
     ],
   );
 
-  const eventStats = useLoadable<EventStatsResponse>(
-    auth.user && scope === "event" && Boolean(selectedEventId)
-      ? () => api.getEventStats(auth.user!.id, Number(selectedEventId), filterQuery)
-      : null,
-    [auth.user?.id, scope, selectedEventId, filters.difficulty, filters.liveType, filters.includeMeta],
-  );
-
   useEffect(() => {
-    if (scope === "event" && recapEvent.data?.from_date) {
-      setAnchorDate(new Date(`${recapEvent.data.from_date}T00:00:00`));
+    if (scope === "event") {
+      const fd = recapEvent.data?.from_date ?? eventStats.data?.from_date;
+      if (fd) setAnchorDate(new Date(`${fd}T00:00:00`));
     }
-  }, [scope, recapEvent.data?.from_date]);
+  }, [scope, recapEvent.data?.from_date, eventStats.data?.from_date]);
 
   if (!auth.user) return null;
   const server = auth.user.server;
@@ -2070,8 +2075,8 @@ function RecapAnalyticsView() {
         yearState={recapCalendarYear}
         monthState={recapCalendarMonth}
         shotsState={recapCalendarShots}
-        showEventMode={scope === "event" && Boolean(recapEvent.data)}
-        eventRange={recapCalendarEventRange}
+        showEventMode={scope === "event" && Boolean(selectedEventId)}
+        eventRange={recapEventWindow}
       />
     </div>
   );
