@@ -1581,8 +1581,11 @@ function OverviewActivitySnippet({
         </div>
       </div>
       <div className="overview-activity__footer">
-        <span className="toolbar-chip">Skill {data.delta_skill_score >= 0 ? "+" : ""}{data.delta_skill_score}</span>
-        <span className="toolbar-chip">Accuracy {data.delta_accuracy >= 0 ? "+" : ""}{data.delta_accuracy}%</span>
+        <span className="overview-activity__delta-label">Delta vs previous</span>
+        <div className="overview-activity__delta-row">
+          <strong>Skill {data.delta_skill_score >= 0 ? "+" : ""}{data.delta_skill_score}</strong>
+          <span>Accuracy {data.delta_accuracy >= 0 ? "+" : ""}{data.delta_accuracy}%</span>
+        </div>
       </div>
     </div>
   );
@@ -2827,7 +2830,8 @@ function RecentPlayList({
   useThumbnailPrewarm(userId, prewarmIds);
 
   if (!items.length) return <EmptyState text="No recent plays found." />;
-  const modalItems: ScreenshotModalItem[] = items.map((item) => ({
+  const visibleItems = items.slice(0, 5);
+  const modalItems: ScreenshotModalItem[] = visibleItems.map((item) => ({
     song_id: item.song_id,
     song_name: item.song_name,
     difficulty: item.difficulty,
@@ -2859,7 +2863,7 @@ function RecentPlayList({
   return (
     <>
       <div className="recent-lives-list">
-        {items.map((item, index) => (
+        {visibleItems.map((item, index) => (
           <button type="button" key={`${item.song_id}-${item.timestamp || index}`} className="recent-live-row" onClick={() => setActive(index)}>
             <div className="recent-live-row__thumb">
               {item.image_url ? (
@@ -2869,47 +2873,36 @@ function RecentPlayList({
               )}
             </div>
             <div className="recent-live-row__main">
-              <div className="recent-live-row__header">
-                <div className="recent-live-row__title-block">
-                  <strong>{item.song_name || `Song ${item.song_id}`}</strong>
-                  <div className="inline-meta">
-                    {formatDifficulty(item.difficulty)}
-                    {item.live_type ? ` · ${formatLiveType(item.live_type)}` : ""}
-                  </div>
+              <div className="recent-live-row__title-block">
+                <strong>{item.song_name || `Song ${item.song_id}`}</strong>
+                <div className="recent-live-row__meta">
+                  <span>{formatDifficulty(item.difficulty)}</span>
+                  {item.live_type ? <span>{formatLiveType(item.live_type)}</span> : null}
                 </div>
+              </div>
+              <div className="recent-live-row__stats-line">
+                <span>P {formatCount(item.perfect)}</span>
+                <span>Gr {formatCount(item.great)}</span>
+                <span>Go {formatCount(item.good)}</span>
+                <span>B {formatCount(item.bad)}</span>
+                <span>M {formatCount(item.miss)}</span>
+                <span>Fast {formatCount(item.fast)}</span>
+                <span>Slow {formatCount(item.slow)}</span>
+              </div>
+            </div>
+            <div className="recent-live-row__aside">
+              <div className="recent-live-row__badges">
                 <div className="badge-row">
                   {item.full_combo ? <span className="badge fc">FC</span> : null}
                   {item.all_perfect ? <span className="badge ap">AP</span> : null}
                   {item.anomaly ? <span className="badge warn">Anomaly</span> : null}
                 </div>
               </div>
-              <div className="recent-live-row__stat-grid">
-                <div className="recent-live-row__stat-group">
-                  <span className="recent-live-row__label">Judgments</span>
-                  <div className="recent-live-row__pairs">
-                    <span>P {formatCount(item.perfect)}</span>
-                    <span>Gr {formatCount(item.great)}</span>
-                    <span>Go {formatCount(item.good)}</span>
-                    <span>B {formatCount(item.bad)}</span>
-                    <span>M {formatCount(item.miss)}</span>
-                  </div>
-                </div>
-                <div className="recent-live-row__stat-group">
-                  <span className="recent-live-row__label">Timing</span>
-                  <div className="recent-live-row__pairs">
-                    <span>Fast {formatCount(item.fast)}</span>
-                    <span>Slow {formatCount(item.slow)}</span>
-                  </div>
-                </div>
-                <div className="recent-live-row__stat-group recent-live-row__stat-group--summary">
-                  <span className="recent-live-row__label">Summary</span>
-                  <div className="recent-live-row__summary">
-                    <strong>{formatAccuracyValue(item.accuracy)}</strong>
-                    <span>Max combo {formatCount(item.max_combo)}</span>
-                  </div>
-                </div>
+              <div className="recent-live-row__summary">
+                <strong>{formatAccuracyValue(item.accuracy)}</strong>
+                <span>Max combo {formatCount(item.max_combo)}</span>
               </div>
-              <div className="inline-meta recent-live-row__timestamp">{formatDateTime(item.timestamp, server)}</div>
+              <div className="recent-live-row__timestamp">{formatDateTime(item.timestamp, server)}</div>
             </div>
           </button>
         ))}

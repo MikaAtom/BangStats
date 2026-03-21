@@ -10,7 +10,7 @@ interface TrendChartProps {
 function formatAxisLabel(fromDate: string, server: User["server"]) {
   const parsed = new Date(fromDate);
   if (Number.isNaN(parsed.getTime())) return fromDate;
-  return parsed.toLocaleDateString(webLocale(server), { month: "short", year: "2-digit" });
+  return parsed.toLocaleDateString(webLocale(server), { month: "short" });
 }
 
 function formatAccuracy(value: number) {
@@ -25,10 +25,10 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
   const n = data.points.length;
   const vbW = 100;
   const vbH = variant === "overview" ? 68 : 44;
-  const padLeft = variant === "overview" ? 4 : 6;
-  const padRight = variant === "overview" ? 4 : 6;
-  const padTop = variant === "overview" ? 9 : 7;
-  const padBottom = variant === "overview" ? 14 : 7;
+  const padLeft = variant === "overview" ? 7 : 6;
+  const padRight = variant === "overview" ? 7 : 6;
+  const padTop = variant === "overview" ? 10 : 7;
+  const padBottom = variant === "overview" ? 16 : 7;
   const innerW = vbW - padLeft - padRight;
   const innerH = vbH - padTop - padBottom;
 
@@ -48,6 +48,7 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
       y,
       axisLabel: formatAxisLabel(point.from_date, server),
       accuracyLabel: formatAccuracy(point.accuracy),
+      textAnchor: (index === 0 ? "start" : index === n - 1 ? "end" : "middle") as "start" | "end" | "middle",
     };
   });
 
@@ -79,11 +80,19 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
             <path d={path} className="trend-line" vectorEffect="non-scaling-stroke" />
             {points.map((point) => (
               <g key={point.label}>
-                <text x={point.x} y={Math.max(point.y - 2.3, 4)} textAnchor="middle" className="trend-accuracy-label">
+                <line
+                  x1={point.x}
+                  x2={point.x}
+                  y1={point.y + 2.3}
+                  y2={vbH - padBottom + 1.2}
+                  className="trend-guide-line"
+                  vectorEffect="non-scaling-stroke"
+                />
+                <text x={point.x} y={Math.max(point.y - 2.5, padTop - 1)} textAnchor={point.textAnchor} className="trend-accuracy-label">
                   {point.accuracyLabel}
                 </text>
                 <circle cx={point.x} cy={point.y} r="1.8" className="trend-dot" vectorEffect="non-scaling-stroke" />
-                <text x={point.x} y={vbH - 5} textAnchor="middle" className="trend-axis-tick">
+                <text x={point.x} y={vbH - 6.2} textAnchor={point.textAnchor} className="trend-axis-tick">
                   {point.axisLabel}
                 </text>
               </g>
@@ -92,21 +101,13 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
         </div>
         <div className="trend-chart-overview__meta" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}>
           {points.map((point) => (
-            <div key={point.label} className="trend-chart-overview__meta-card">
+            <div key={point.label} className="trend-chart-overview__meta-col">
               <strong>{point.skill_score}</strong>
               <span>{point.plays} plays</span>
-              <span>
-                {point.fc} FC · {point.ap} AP
-              </span>
+              <span>{point.fc} FC · {point.ap} AP</span>
             </div>
           ))}
         </div>
-        {n > 1 ? (
-          <div className="trend-chart-overview__delta">
-            <span className="toolbar-chip">Skill {data.delta_skill_score >= 0 ? "+" : ""}{data.delta_skill_score}</span>
-            <span className="toolbar-chip">Accuracy {data.delta_accuracy >= 0 ? "+" : ""}{data.delta_accuracy}%</span>
-          </div>
-        ) : null}
       </div>
     );
   }

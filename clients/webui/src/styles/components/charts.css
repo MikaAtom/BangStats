@@ -139,34 +139,43 @@
 
 .trend-chart-overview__meta {
   display: grid;
-  gap: var(--space-2);
+  gap: 0;
+  padding-top: var(--space-2);
 }
 
-.trend-chart-overview__meta-card {
+.trend-chart-overview__meta-col {
   min-width: 0;
   display: grid;
-  gap: 0.15rem;
-  padding: var(--space-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-tertiary);
+  gap: 0.1rem;
+  padding: var(--space-2) var(--space-1);
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
   text-align: center;
+  position: relative;
 }
 
-.trend-chart-overview__meta-card strong {
+.trend-chart-overview__meta-col:first-child {
+  border-left: none;
+}
+
+.trend-chart-overview__meta-col::before {
+  content: "";
+  position: absolute;
+  top: calc(var(--space-2) * -1);
+  left: 50%;
+  width: 1px;
+  height: var(--space-2);
+  background: rgba(255, 255, 255, 0.14);
+  transform: translateX(-50%);
+}
+
+.trend-chart-overview__meta-col strong {
   font-size: var(--text-base);
 }
 
-.trend-chart-overview__meta-card span {
+.trend-chart-overview__meta-col span {
   color: var(--text-secondary);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   line-height: 1.2;
-}
-
-.trend-chart-overview__delta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
 }
 
 .trend-chart-synced__columns {
@@ -237,6 +246,10 @@
   stroke-width: 2;
 }
 
+.trend-chart--overview .trend-dot {
+  stroke: none;
+}
+
 .trend-grid-line {
   stroke: rgba(255, 255, 255, 0.08);
   stroke-width: 0.35;
@@ -244,6 +257,11 @@
 
 .trend-grid-line--base {
   stroke: rgba(255, 255, 255, 0.18);
+}
+
+.trend-guide-line {
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 0.35;
 }
 
 .trend-value-label {
@@ -254,13 +272,13 @@
 
 .trend-accuracy-label {
   fill: var(--text-primary);
-  font-size: 2.5px;
+  font-size: 2.2px;
   font-weight: 700;
 }
 
 .trend-axis-tick {
   fill: var(--text-secondary);
-  font-size: 2.25px;
+  font-size: 2px;
   letter-spacing: 0.02em;
 }
 
@@ -394,6 +412,10 @@
 
   .trend-chart-overview__meta {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .trend-chart-overview__meta-col {
+    padding-inline: var(--space-2);
   }
 }
 
