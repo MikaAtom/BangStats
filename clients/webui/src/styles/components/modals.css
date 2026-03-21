@@ -71,6 +71,8 @@
   width: 100%;
   min-width: 0;
   align-self: end;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .calendar-modal__focus--empty {
@@ -97,13 +99,14 @@
 
 .calendar-modal__toprow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(15rem, 20rem) 7.5rem auto;
+  grid-template-columns: max-content minmax(0, 1fr) auto auto;
   gap: var(--space-4);
   align-items: end;
 }
 
 .calendar-modal__heading {
   min-width: 0;
+  max-width: min(34rem, 100%);
   display: grid;
   gap: var(--space-1);
 }
@@ -152,6 +155,7 @@
   align-items: end;
   justify-content: flex-end;
   flex-shrink: 0;
+  justify-self: end;
 }
 
 .calendar-modal__mode select {
@@ -630,11 +634,14 @@
   }
 
   .calendar-modal__toprow {
-    grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem) 7.5rem auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: var(--space-3);
   }
 
   .calendar-modal__focus {
+    grid-column: 1 / -1;
     width: 100%;
+    justify-content: flex-start;
   }
 
   .calendar-year__grid {
@@ -656,6 +663,7 @@
     grid-column: 1;
     width: 100%;
     min-width: 0;
+    justify-content: flex-start;
   }
 
   .calendar-modal__mode {
