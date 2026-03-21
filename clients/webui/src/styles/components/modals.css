@@ -35,6 +35,18 @@
   width: min(1240px, 100%);
 }
 
+.calendar-explorer-inline {
+  width: 100%;
+  min-width: 0;
+}
+
+.calendar-modal--inline {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -81,7 +93,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
-  min-height: min(60vh, 700px);
+  min-height: min(68vh, 760px);
   min-width: 0;
 }
 
@@ -121,6 +133,7 @@
 
 .calendar-hour-grid-wrap {
   overflow: auto;
+  min-height: min(52vh, 560px);
   max-height: min(62vh, 720px);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);

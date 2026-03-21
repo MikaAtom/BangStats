@@ -129,6 +129,7 @@ export function CalendarExplorerModal({
   shotsState,
   showEventMode = false,
   eventRange = null,
+  variant = "modal",
 }: {
   open: boolean;
   title: string;
@@ -144,6 +145,8 @@ export function CalendarExplorerModal({
   shotsState: Loadable<ScreenshotListResponse> & { reload: () => Promise<void> };
   showEventMode?: boolean;
   eventRange?: { from_date: string; to_date: string } | null;
+  /** Inline: embedded in a page (no backdrop, no Close). */
+  variant?: "modal" | "inline";
 }) {
   const [shotModalIndex, setShotModalIndex] = useState<number | null>(null);
   useEffect(() => {
@@ -176,57 +179,68 @@ export function CalendarExplorerModal({
   const showHourGrid = !shotsIdle && !shotsState.error && orderedShots.length > 0;
   const showShotEmpty = !shotsIdle && !shotsState.loading && !shotsState.error && orderedShots.length === 0;
 
-  const eventOptionVisible = showEventMode && Boolean(eventRange?.from_date && eventRange?.to_date);
+  const eventRangeReady = Boolean(eventRange?.from_date && eventRange?.to_date);
+  const isInline = variant === "inline";
 
   if (!open) return null;
 
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <div className="modal modal-wide calendar-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-        <div className="modal-header calendar-modal__header">
-          <div>
-            <h3>{title}</h3>
-            <div className="inline-meta">
-              {subtitle || rangeLabel}
-              {!shotsIdle && orderedShots.length ? ` · ${orderedShots.length} screenshots` : ""}
-            </div>
+  const shell = (
+    <div
+      className={`modal modal-wide calendar-modal${isInline ? " calendar-modal--inline" : ""}`}
+      role={isInline ? undefined : "dialog"}
+      aria-modal={isInline ? undefined : true}
+      onClick={isInline ? undefined : (event) => event.stopPropagation()}
+    >
+      <div className="modal-header calendar-modal__header">
+        <div>
+          <h3>{title}</h3>
+          <div className="inline-meta">
+            {subtitle || rangeLabel}
+            {!shotsIdle && orderedShots.length ? ` · ${orderedShots.length} screenshots` : ""}
           </div>
-          <div className="button-row tight calendar-modal__toolbar">
-            <div className="calendar-modal__mode">
-              <span className="calendar-modal__mode-label">Mode</span>
-              <select value={mode} onChange={(event) => onModeChange(event.target.value as CalendarExplorerMode)}>
-                <option value="year">Year</option>
-                <option value="month">Month</option>
-                <option value="week">Week</option>
-                <option value="day">Day</option>
-                {eventOptionVisible ? <option value="event">Event</option> : null}
-              </select>
-            </div>
-            <button
-              className="button ghost"
-              type="button"
-              disabled={mode === "event"}
-              onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, -1))}
-            >
-              Prev
-            </button>
-            <div className="toolbar-chip">{rangeLabel}</div>
-            <button
-              className="button ghost"
-              type="button"
-              disabled={mode === "event"}
-              onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, 1))}
-            >
-              Next
-            </button>
+        </div>
+        <div className="button-row tight calendar-modal__toolbar">
+          <div className="calendar-modal__mode">
+            <span className="calendar-modal__mode-label">Mode</span>
+            <select value={mode} onChange={(event) => onModeChange(event.target.value as CalendarExplorerMode)}>
+              <option value="year">Year</option>
+              <option value="month">Month</option>
+              <option value="week">Week</option>
+              <option value="day">Day</option>
+              {showEventMode ? (
+                <option value="event" disabled={!eventRangeReady}>
+                  Event{!eventRangeReady ? " (loading…)" : ""}
+                </option>
+              ) : null}
+            </select>
+          </div>
+          <button
+            className="button ghost"
+            type="button"
+            disabled={mode === "event"}
+            onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, -1))}
+          >
+            Prev
+          </button>
+          <div className="toolbar-chip">{rangeLabel}</div>
+          <button
+            className="button ghost"
+            type="button"
+            disabled={mode === "event"}
+            onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, 1))}
+          >
+            Next
+          </button>
+          {isInline ? null : (
             <button className="button ghost" type="button" onClick={onClose}>
               Close
             </button>
-          </div>
+          )}
         </div>
+      </div>
 
-        <div className="calendar-modal__layout">
-          <div className="calendar-modal__browser">
+      <div className="calendar-modal__layout">
+        <div className="calendar-modal__browser">
             {mode === "year" && yearState.loading ? (
               <LoadingInline />
             ) : mode === "year" && yearState.error ? (
@@ -309,7 +323,18 @@ export function CalendarExplorerModal({
             {showShotEmpty ? <EmptyState text="No screenshots found for this range." /> : null}
           </div>
         </div>
-      </div>
+    </div>
+  );
+
+  return (
+    <>
+      {isInline ? (
+        <div className="calendar-explorer-inline">{shell}</div>
+      ) : (
+        <div className="modal-backdrop" role="presentation" onClick={onClose}>
+          {shell}
+        </div>
+      )}
       {shotModalIndex != null && modalItems.length ? (
         <ScreenshotModal
           elevated
@@ -320,6 +345,6 @@ export function CalendarExplorerModal({
           onIndexChange={setShotModalIndex}
         />
       ) : null}
-    </div>
+    </>
   );
 }

@@ -70,7 +70,7 @@ import {
   type CalendarExplorerMode,
 } from "./components/calendar/CalendarExplorerModal";
 
-type AnalyticsView = "overview" | "progress" | "milestones" | "songs" | "recap" | "screenshots";
+type AnalyticsView = "overview" | "progress" | "milestones" | "songs" | "recap" | "calendar" | "screenshots";
 
 type SidebarItem = {
   to: string;
@@ -84,7 +84,7 @@ const DEFAULT_DATE_RANGE: DateRangeValue = {
   to: "",
 };
 
-const ANALYTICS_VIEWS: AnalyticsView[] = ["overview", "progress", "milestones", "songs", "recap", "screenshots"];
+const ANALYTICS_VIEWS: AnalyticsView[] = ["overview", "progress", "milestones", "songs", "recap", "calendar", "screenshots"];
 const DIFFICULTY_FILTERS = ["easy", "normal", "hard", "expert", "special"];
 const LIVE_TYPE_FILTERS = ["normal_live", "event_live", "challenge_live", "multi_live", "vs_live", "free_live"];
 const CORRECTION_DIFFICULTIES = ["easy", "normal", "hard", "expert", "special"] as const;
@@ -1438,6 +1438,7 @@ function StatsPage() {
       {view === "milestones" && <MilestonesAnalyticsView />}
       {view === "songs" && <SongsAnalyticsView />}
       {view === "recap" && <RecapAnalyticsView />}
+      {view === "calendar" && <CalendarAnalyticsView />}
       {view === "screenshots" && <ScreenshotsAnalyticsView />}
     </div>
   );
@@ -1502,27 +1503,14 @@ function OverviewAnalyticsView() {
 
 function ProgressAnalyticsView() {
   const auth = useAuth();
-  const [searchParams, setSearchParams] = useSearchParams();
   const [range, setRange] = useState<DateRangeValue>(DEFAULT_DATE_RANGE);
   const [scope, setScope] = useState<"weekly" | "monthly" | "yearly">("monthly");
   const [pointCount, setPointCount] = useState(8);
   const [filters, setFilters] = useState<SectionFilterState>({ difficulty: "", liveType: "", includeMeta: false });
-  const [calendarDate, setCalendarDate] = useState(() => new Date());
-  const [calMode, setCalMode] = useState<CalendarExplorerMode>("month");
-  const [calendarOpen, setCalendarOpen] = useState(false);
   const customRangeReady = range.preset !== "custom" || (Boolean(range.from) && Boolean(range.to));
   const filterQuery = sectionFiltersToQuery(filters);
   const rangeQuery = dateRangeToQuery(range);
   const anchorDate = resolveAbsoluteDateRange(range)?.to_date || new Date().toISOString().slice(0, 10);
-
-  useEffect(() => {
-    const d = searchParams.get("calDay");
-    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-      setCalendarDate(new Date(`${d}T00:00:00`));
-      setCalMode("day");
-      setCalendarOpen(true);
-    }
-  }, [searchParams]);
 
   const activity = useLoadable<ActivityResponse>(
     auth.user && customRangeReady ? () => api.getActivity(auth.user!.id, { ...rangeQuery, ...filterQuery }) : null,
@@ -1531,30 +1519,6 @@ function ProgressAnalyticsView() {
   const progression = useLoadable<ProgressionResponse>(
     auth.user ? () => api.getProgression(auth.user!.id, scope, pointCount, anchorDate, filterQuery) : null,
     [auth.user?.id, scope, pointCount, anchorDate, filters.difficulty, filters.liveType, filters.includeMeta],
-  );
-  const calendar = useLoadable<CalendarResponse>(
-    auth.user && calendarOpen && (calMode === "month" || calMode === "week" || calMode === "day")
-      ? () => api.getCalendar(auth.user!.id, calendarDate.getFullYear(), calendarDate.getMonth() + 1, filterQuery)
-      : null,
-    [auth.user?.id, calendarOpen, calendarDate.getFullYear(), calendarDate.getMonth(), filters.difficulty, filters.liveType, filters.includeMeta, calMode],
-  );
-  const yearCal = useLoadable<CalendarYearResponse>(
-    auth.user && calendarOpen && calMode === "year" ? () => api.getCalendarYear(auth.user!.id, calendarDate.getFullYear(), filterQuery) : null,
-    [auth.user?.id, calendarOpen, calendarDate.getFullYear(), filters.difficulty, filters.liveType, filters.includeMeta, calMode],
-  );
-  const calendarShots = useLoadable(
-    auth.user && calendarOpen && calMode !== "year"
-      ? () =>
-          api.listScreenshots(auth.user!.id, {
-            ...filterQuery,
-            ...calendarRangeForMode(calMode, calendarDate),
-            limit: calMode === "day" ? 80 : 200,
-            offset: 0,
-            sort_by: "timestamp",
-            sort_order: "desc",
-          })
-      : null,
-    [auth.user?.id, calendarOpen, calMode, calendarDate.getFullYear(), calendarDate.getMonth(), calendarDate.getDate(), filters.difficulty, filters.liveType, filters.includeMeta],
   );
 
   if (!auth.user) return null;
@@ -1565,9 +1529,9 @@ function ProgressAnalyticsView() {
       <Card
         title="Scope & filters"
         actions={
-          <button className="button primary" type="button" onClick={() => setCalendarOpen(true)}>
+          <Link className="button primary" to="/stats?view=calendar">
             Open calendar
-          </button>
+          </Link>
         }
       >
         <p className="inline-meta progress-analytics-toolbar__hint">
@@ -1607,9 +1571,7 @@ function ProgressAnalyticsView() {
             </div>
           </div>
           <div className="inline-meta progress-analytics-toolbar__footer">
-            Calendar anchor:{" "}
-            <strong>{formatDifficulty(calMode)}</strong> ·{" "}
-            <strong>{calendarDate.toLocaleDateString(webLocale(server), { month: "short", day: "numeric", year: "numeric" })}</strong>
+            <Link to="/stats?view=calendar">Calendar</Link>
             {" · "}
             <Link to="/stats?view=milestones">Milestone timeline</Link>
           </div>
@@ -1634,20 +1596,182 @@ function ProgressAnalyticsView() {
           <LoadingInline />
         )}
       </Card>
-      <CalendarExplorerModal
-        open={calendarOpen}
-        title="Progress calendar"
-        subtitle="Shared explorer for chart drilldown."
-        server={server}
-        mode={calMode as CalendarExplorerMode}
-        anchorDate={calendarDate}
-        onModeChange={(next) => setCalMode(next)}
-        onAnchorDateChange={setCalendarDate}
-        onClose={() => setCalendarOpen(false)}
-        yearState={yearCal}
-        monthState={calendar}
-        shotsState={calendarShots}
-      />
+    </div>
+  );
+}
+
+function CalendarAnalyticsView() {
+  const auth = useAuth();
+  const [searchParams] = useSearchParams();
+  const [filters, setFilters] = useState<SectionFilterState>({ difficulty: "", liveType: "", includeMeta: false });
+  const filterQuery = sectionFiltersToQuery(filters);
+  const [anchorDate, setAnchorDate] = useState(() => new Date());
+  const [mode, setMode] = useState<CalendarExplorerMode>("month");
+  const [selectedEventId, setSelectedEventId] = useState("");
+  const [eventSearch, setEventSearch] = useState("");
+
+  const songIdRaw = searchParams.get("songId");
+  const songIdNumber = songIdRaw && /^\d+$/.test(songIdRaw) ? Number(songIdRaw) : undefined;
+
+  const events = useLoadable(auth.user ? () => api.getReferenceEvents(1200) : null, [auth.user?.id]);
+
+  useEffect(() => {
+    const d = searchParams.get("calDay");
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      setAnchorDate(new Date(`${d}T00:00:00`));
+    }
+    const m = searchParams.get("calMode");
+    if (m === "year" || m === "month" || m === "week" || m === "day" || m === "event") {
+      setMode(m);
+    }
+    const eid = searchParams.get("eventId");
+    if (eid) setSelectedEventId(eid);
+  }, [searchParams]);
+
+  const eventStats = useLoadable<EventStatsResponse>(
+    auth.user && selectedEventId
+      ? () => api.getEventStats(auth.user!.id, Number(selectedEventId), filterQuery)
+      : null,
+    [auth.user?.id, selectedEventId, filters.difficulty, filters.liveType, filters.includeMeta],
+  );
+
+  const calendarEventWindow =
+    selectedEventId && eventStats.data
+      ? { from_date: eventStats.data.from_date, to_date: eventStats.data.to_date }
+      : null;
+
+  useEffect(() => {
+    if (mode === "event" && !calendarEventWindow) {
+      setMode("month");
+    }
+  }, [mode, calendarEventWindow]);
+
+  const screenshotRange = useMemo(() => {
+    if (mode === "event") {
+      return calendarEventWindow;
+    }
+    return calendarRangeForMode(mode, anchorDate, null);
+  }, [mode, anchorDate, calendarEventWindow]);
+
+  const calendarMonth = useLoadable<CalendarResponse>(
+    auth.user && (mode === "month" || mode === "week" || mode === "day")
+      ? () => api.getCalendar(auth.user!.id, anchorDate.getFullYear(), anchorDate.getMonth() + 1, filterQuery, songIdNumber)
+      : null,
+    [
+      auth.user?.id,
+      mode,
+      anchorDate.getFullYear(),
+      anchorDate.getMonth(),
+      filters.difficulty,
+      filters.liveType,
+      filters.includeMeta,
+      songIdNumber,
+    ],
+  );
+
+  const calendarYear = useLoadable<CalendarYearResponse>(
+    auth.user && mode === "year"
+      ? () => api.getCalendarYear(auth.user!.id, anchorDate.getFullYear(), filterQuery, songIdNumber)
+      : null,
+    [auth.user?.id, mode, anchorDate.getFullYear(), filters.difficulty, filters.liveType, filters.includeMeta, songIdNumber],
+  );
+
+  const calendarShots = useLoadable(
+    auth.user && mode !== "year" && screenshotRange
+      ? () =>
+          api.listScreenshots(auth.user!.id, {
+            ...filterQuery,
+            ...(songIdNumber ? { songId: songIdNumber } : {}),
+            ...screenshotRange,
+            limit: mode === "day" ? 80 : 200,
+            offset: 0,
+            sort_by: "timestamp",
+            sort_order: "desc",
+          })
+      : null,
+    [
+      auth.user?.id,
+      mode,
+      anchorDate.getFullYear(),
+      anchorDate.getMonth(),
+      anchorDate.getDate(),
+      screenshotRange?.from_date,
+      screenshotRange?.to_date,
+      filters.difficulty,
+      filters.liveType,
+      filters.includeMeta,
+      songIdNumber,
+    ],
+  );
+
+  if (!auth.user) return null;
+  const server = auth.user.server;
+  const recentEvents = ((events.data?.items || []) as Array<Record<string, unknown>>)
+    .slice()
+    .filter((event) => Number.isFinite(Number(event.event_id || event.id)) && Number(event.event_id || event.id) > 0)
+    .sort((a, b) => Number(b.event_id || b.id || 0) - Number(a.event_id || a.id || 0));
+  const q = eventSearch.trim().toLowerCase();
+  const filteredEvents = q
+    ? recentEvents.filter((event) => formatEventLabelDateOnly(event, server).toLowerCase().includes(q))
+    : recentEvents;
+
+  const subtitle =
+    songIdNumber != null
+      ? `Filtered to song #${songIdNumber}`
+      : selectedEventId
+        ? "Pick Event mode after the event window loads to browse the full event range."
+        : "Year, month, week, day, and optional event window.";
+
+  return (
+    <div className="page-grid">
+      <Card title="Calendar filters" subtitle="Same play filters as other analytics views.">
+        <div className="analytics-filter-row">
+          <SectionFilterControls filters={filters} onChange={setFilters} />
+        </div>
+      </Card>
+      <Card title="Event (optional)" subtitle="Select an event to enable Event mode in the explorer.">
+        <div className="stack">
+          <label className="field">
+            <span>Search events</span>
+            <input value={eventSearch} onChange={(e) => setEventSearch(e.target.value)} placeholder="Filter by name or date" />
+          </label>
+          <label className="field inline-field">
+            <span>Event</span>
+            <select
+              value={selectedEventId}
+              onChange={(event) => {
+                setSelectedEventId(event.target.value);
+                if (!event.target.value) setMode((m) => (m === "event" ? "month" : m));
+              }}
+            >
+              <option value="">None (hide Event dates)</option>
+              {filteredEvents.slice(0, 200).map((event) => (
+                <option key={String(event.event_id || event.id)} value={String(event.event_id || event.id)}>
+                  {formatEventLabelDateOnly(event, server)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </Card>
+      <Card title="Explorer" subtitle={subtitle}>
+        <CalendarExplorerModal
+          open
+          variant="inline"
+          title="Calendar"
+          server={server}
+          mode={mode}
+          anchorDate={anchorDate}
+          onModeChange={setMode}
+          onAnchorDateChange={setAnchorDate}
+          onClose={() => {}}
+          yearState={calendarYear}
+          monthState={calendarMonth}
+          shotsState={calendarShots}
+          showEventMode={Boolean(selectedEventId)}
+          eventRange={calendarEventWindow}
+        />
+      </Card>
     </div>
   );
 }
@@ -1826,6 +1950,7 @@ function SongsAnalyticsView() {
 
 function RecapAnalyticsView() {
   const auth = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const readScope = (value: string | null): RecapScope => {
     if (value === "weekly" || value === "monthly" || value === "yearly" || value === "event") return value;
@@ -1833,8 +1958,6 @@ function RecapAnalyticsView() {
   };
   const [scope, setScope] = useState<RecapScope>(() => readScope(searchParams.get("scope")));
   const [anchorDate, setAnchorDate] = useState(() => new Date());
-  const [calendarOpen, setCalendarOpen] = useState(false);
-  const [calendarMode, setCalendarMode] = useState<CalendarExplorerMode>("month");
   const [selectedEventId, setSelectedEventId] = useState("");
   const [eventSearch, setEventSearch] = useState("");
   const [filters, setFilters] = useState<SectionFilterState>({ difficulty: "", liveType: "", includeMeta: false });
@@ -1844,10 +1967,6 @@ function RecapAnalyticsView() {
   useEffect(() => {
     setScope(readScope(searchParams.get("scope")));
   }, [searchParams]);
-
-  useEffect(() => {
-    setCalendarMode(scope === "yearly" ? "year" : "month");
-  }, [scope]);
 
   const recapGeneral = useLoadable<RecapResponse>(
     auth.user && scope !== "event"
@@ -1868,64 +1987,6 @@ function RecapAnalyticsView() {
       ? () => api.getEventStats(auth.user!.id, Number(selectedEventId), filterQuery)
       : null,
     [auth.user?.id, scope, selectedEventId, filters.difficulty, filters.liveType, filters.includeMeta],
-  );
-
-  /** Event date window for calendar + screenshots (recap or event-stats; recap can lag behind stats). */
-  const recapEventWindow =
-    scope === "event" && selectedEventId
-      ? recapEvent.data
-        ? { from_date: recapEvent.data.from_date, to_date: recapEvent.data.to_date }
-        : eventStats.data
-          ? { from_date: eventStats.data.from_date, to_date: eventStats.data.to_date }
-          : null
-      : null;
-
-  const recapScreenshotRange =
-    recapEventWindow ?? (scope === "event" && selectedEventId ? null : calendarRangeForMode(calendarMode, anchorDate, null));
-
-  useEffect(() => {
-    if (calendarMode === "event" && !recapEventWindow) {
-      setCalendarMode("month");
-    }
-  }, [calendarMode, recapEventWindow]);
-
-  const recapCalendarMonth = useLoadable<CalendarResponse>(
-    auth.user && calendarOpen && (calendarMode === "month" || calendarMode === "week" || calendarMode === "day")
-      ? () => api.getCalendar(auth.user!.id, anchorDate.getFullYear(), anchorDate.getMonth() + 1, filterQuery)
-      : null,
-    [auth.user?.id, calendarOpen, calendarMode, anchorDate.getFullYear(), anchorDate.getMonth(), filters.difficulty, filters.liveType, filters.includeMeta],
-  );
-
-  const recapCalendarYear = useLoadable<CalendarYearResponse>(
-    auth.user && calendarOpen && calendarMode === "year" ? () => api.getCalendarYear(auth.user!.id, anchorDate.getFullYear(), filterQuery) : null,
-    [auth.user?.id, calendarOpen, calendarMode, anchorDate.getFullYear(), filters.difficulty, filters.liveType, filters.includeMeta],
-  );
-
-  const recapCalendarShots = useLoadable(
-    auth.user && calendarOpen && calendarMode !== "year" && recapScreenshotRange
-      ? () =>
-          api.listScreenshots(auth.user!.id, {
-            ...filterQuery,
-            ...recapScreenshotRange,
-            limit: calendarMode === "day" ? 80 : 200,
-            offset: 0,
-            sort_by: "timestamp",
-            sort_order: "desc",
-          })
-      : null,
-    [
-      auth.user?.id,
-      calendarOpen,
-      calendarMode,
-      anchorDate.getFullYear(),
-      anchorDate.getMonth(),
-      anchorDate.getDate(),
-      recapScreenshotRange?.from_date,
-      recapScreenshotRange?.to_date,
-      filters.difficulty,
-      filters.liveType,
-      filters.includeMeta,
-    ],
   );
 
   useEffect(() => {
@@ -1954,15 +2015,26 @@ function RecapAnalyticsView() {
     setSearchParams(p, { replace: true });
   }
 
+  const calendarLink =
+    scope === "event" && selectedEventId
+      ? `/stats?view=calendar&eventId=${encodeURIComponent(selectedEventId)}&calMode=event`
+      : "/stats?view=calendar";
+
   return (
     <div className="page-grid">
       <Card
         title="Recap controls"
-        subtitle="Scope, filters, and the shared calendar modal stay fixed while the recap data changes."
+        subtitle="Scope and filters for recap summaries. Open the Calendar tab for the play explorer."
         actions={
-          <button className="button primary" type="button" disabled={scope === "event" && !selectedEventId} onClick={() => setCalendarOpen(true)}>
-            Open calendar
-          </button>
+          scope === "event" && !selectedEventId ? (
+            <button className="button primary" type="button" disabled>
+              Open calendar
+            </button>
+          ) : (
+            <Link className="button primary" to={calendarLink}>
+              Open calendar
+            </Link>
+          )
         }
       >
         <div className="analytics-control-rail">
@@ -2051,31 +2123,13 @@ function RecapAnalyticsView() {
             server={server}
             scope={scope}
             onOpenCalendarDay={(date) => {
-              setAnchorDate(new Date(`${date}T00:00:00`));
-              setCalendarMode("day");
-              setCalendarOpen(true);
+              navigate(`/stats?view=calendar&calDay=${encodeURIComponent(date)}&calMode=day`);
             }}
           />
         ) : (
           <LoadingInline />
         )}
       </Card>
-      <CalendarExplorerModal
-        open={calendarOpen}
-        title="Recap calendar"
-        subtitle={scope === "event" ? "Event drilldown using the shared calendar modal." : `Range anchored to ${recapNavLabel(scope, anchorDate, server)}`}
-        server={server}
-        mode={calendarMode}
-        anchorDate={anchorDate}
-        onModeChange={setCalendarMode}
-        onAnchorDateChange={setAnchorDate}
-        onClose={() => setCalendarOpen(false)}
-        yearState={recapCalendarYear}
-        monthState={recapCalendarMonth}
-        shotsState={recapCalendarShots}
-        showEventMode={scope === "event" && Boolean(selectedEventId)}
-        eventRange={recapEventWindow}
-      />
     </div>
   );
 }
@@ -2253,9 +2307,6 @@ function SongStatsPage() {
   const { songId } = useParams();
   const songIdNumber = Number(songId);
   const [difficulty, setDifficulty] = useState<string>("");
-  const [songCalendarOpen, setSongCalendarOpen] = useState(false);
-  const [songCalendarMode, setSongCalendarMode] = useState<CalendarExplorerMode>("month");
-  const [songCalendarAnchor, setSongCalendarAnchor] = useState(() => new Date());
   const data = useLoadable<SongStatsResponse>(
     auth.user && Number.isFinite(songIdNumber)
       ? () => api.getSongStats(auth.user!.id, songIdNumber, difficulty || undefined)
@@ -2268,40 +2319,6 @@ function SongStatsPage() {
       : null,
     [auth.user?.id, songIdNumber, difficulty],
   );
-  const songCalendarYear = useLoadable<CalendarYearResponse>(
-    auth.user && songCalendarOpen && songCalendarMode === "year"
-      ? () => api.getCalendarYear(auth.user!.id, songCalendarAnchor.getFullYear(), {}, songIdNumber)
-      : null,
-    [auth.user?.id, songCalendarOpen, songCalendarMode, songCalendarAnchor.getFullYear(), songIdNumber],
-  );
-  const songCalendarMonth = useLoadable<CalendarResponse>(
-    auth.user && songCalendarOpen && (songCalendarMode === "month" || songCalendarMode === "week" || songCalendarMode === "day")
-      ? () => api.getCalendar(auth.user!.id, songCalendarAnchor.getFullYear(), songCalendarAnchor.getMonth() + 1, {}, songIdNumber)
-      : null,
-    [auth.user?.id, songCalendarOpen, songCalendarMode, songCalendarAnchor.getFullYear(), songCalendarAnchor.getMonth(), songIdNumber],
-  );
-  const songCalendarShots = useLoadable(
-    auth.user && songCalendarOpen && songCalendarMode !== "year"
-      ? () =>
-          api.listScreenshots(auth.user!.id, {
-            songId: songIdNumber,
-            from_date: calendarRangeForMode(songCalendarMode, songCalendarAnchor).from_date,
-            to_date: calendarRangeForMode(songCalendarMode, songCalendarAnchor).to_date,
-            limit: songCalendarMode === "day" ? 80 : 200,
-            offset: 0,
-            sort_by: "timestamp",
-            sort_order: "desc",
-          })
-      : null,
-    [auth.user?.id, songCalendarOpen, songCalendarMode, songCalendarAnchor.getFullYear(), songCalendarAnchor.getMonth(), songCalendarAnchor.getDate(), songIdNumber],
-  );
-
-  useEffect(() => {
-    const ts = journey.data?.first_played?.timestamp;
-    if (ts) {
-      setSongCalendarAnchor(new Date(`${ts.slice(0, 10)}T00:00:00`));
-    }
-  }, [journey.data?.first_played?.timestamp]);
 
   if (!auth.user) return null;
   const server = auth.user.server;
@@ -2348,23 +2365,14 @@ function SongStatsPage() {
           </div>
           <Card
             title="Song calendar"
-            subtitle="Open the shared calendar modal filtered to this song."
+            subtitle="Browse plays for this song in the Calendar tab."
             actions={
-              <button
-                className="button primary"
-                type="button"
-                onClick={() => {
-                  setSongCalendarMode("month");
-                  setSongCalendarOpen(true);
-                }}
-              >
+              <Link className="button primary" to={`/stats?view=calendar&songId=${songIdNumber}`}>
                 Open calendar
-              </button>
+              </Link>
             }
           >
-            <div className="inline-meta">
-              The same year / month / week / day modal is reused here, but filtered to this song so the drilldown stays consistent.
-            </div>
+            <div className="inline-meta">The Calendar tab loads the same explorer, scoped to this song via the URL.</div>
           </Card>
           <div className="layout-two">
             <Card title="Milestone captures">
@@ -2388,20 +2396,6 @@ function SongStatsPage() {
           <Card title="Journey timeline" subtitle="Vertical progression through the song's milestone screenshots and events.">
             {journey.data ? <TimelinePanel items={journey.data.timeline} server={server} /> : <LoadingInline />}
           </Card>
-          <CalendarExplorerModal
-            open={songCalendarOpen}
-            title="Song calendar"
-            subtitle={journey.data?.song_name || `Song #${songIdNumber}`}
-            server={server}
-            mode={songCalendarMode}
-            anchorDate={songCalendarAnchor}
-            onModeChange={setSongCalendarMode}
-            onAnchorDateChange={setSongCalendarAnchor}
-            onClose={() => setSongCalendarOpen(false)}
-            yearState={songCalendarYear}
-            monthState={songCalendarMonth}
-            shotsState={songCalendarShots}
-          />
         </div>
       )}
     </div>
@@ -2934,7 +2928,7 @@ function RecapPanel({
       )}
       {showHeatStrip && digest.length > 0 && (
         <div className="stack">
-          <div className="subheading">Activity heatmap (click opens shared calendar)</div>
+          <div className="subheading">Activity heatmap (click opens Calendar tab)</div>
           <div className="recap-heatmap-mini">
             {digest.map((row) => {
               const intensity = row.plays / maxPlays;
