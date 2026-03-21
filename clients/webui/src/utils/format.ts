@@ -72,6 +72,24 @@ export function formatEventLabel(event: Record<string, unknown>, server: User["s
   return name;
 }
 
+export function formatEventLabelDateOnly(event: Record<string, unknown>, server: User["server"]) {
+  const rawName = event.event_name;
+  let name = `Event #${String(event.id || event.event_id || "")}`;
+  if (rawName && typeof rawName === "object") {
+    const map = rawName as Record<string, string>;
+    name = map[server] || map.en || Object.values(map)[0] || name;
+  } else if (typeof rawName === "string" && rawName.trim()) {
+    name = rawName;
+  }
+
+  const start = formatEventBoundaryDateOnly(event.event_start_at, server);
+  const end = formatEventBoundaryDateOnly(event.event_end_at, server);
+  if (start !== "Not found in repo" && end !== "Not found in repo") {
+    return `${name} · ${start} -> ${end}`;
+  }
+  return name;
+}
+
 export function resolveEventName(event: Record<string, unknown> | null | undefined, server: User["server"]) {
   if (!event) return "No current event";
   return formatEventLabel(event, server).split(" · ")[0];
@@ -86,6 +104,16 @@ export function formatEventBoundary(value: unknown, server: User["server"]) {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+  });
+}
+
+export function formatEventBoundaryDateOnly(value: unknown, server: User["server"]) {
+  const timestampMs = coerceTimestampMs(value, server);
+  if (timestampMs == null) return "Not found in repo";
+  return new Date(timestampMs).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
   });
 }
 

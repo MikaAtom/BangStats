@@ -571,6 +571,25 @@ class ApiClient {
     return `${method}::${path}::${this.token || "anon"}`;
   }
 
+  private getCacheTtlMs(path: string) {
+    const normalized = path.split("?")[0];
+    if (normalized.startsWith("/api/reference/")) {
+      return 30 * 60 * 1000;
+    }
+    if (
+      normalized.includes("/search") ||
+      normalized.includes("/screenshots") ||
+      normalized.includes("/stats/progression") ||
+      normalized.includes("/stats/calendar")
+    ) {
+      return 30 * 1000;
+    }
+    if (normalized.startsWith("/api/users/") && normalized.includes("/stats")) {
+      return 60 * 1000;
+    }
+    return this.cacheTtlMs;
+  }
+
   private isCacheableGetPath(path: string) {
     const volatilePrefixes = [
       "/api/scans/jobs",
@@ -671,7 +690,7 @@ class ApiClient {
       const payload = (await response.json()) as T;
       if (useGetCache) {
         this.jsonCache.set(cacheKey, {
-          expiresAt: Date.now() + this.cacheTtlMs,
+          expiresAt: Date.now() + this.getCacheTtlMs(path),
           value: payload,
         });
       } else {
@@ -720,7 +739,7 @@ class ApiClient {
     }
       const blob = await response.blob();
       this.blobCache.set(cacheKey, {
-        expiresAt: Date.now() + this.cacheTtlMs,
+        expiresAt: Date.now() + this.getCacheTtlMs(path),
         value: blob,
       });
       return blob;
@@ -936,10 +955,11 @@ class ApiClient {
     return this.request<SongStatsResponse>(`/api/users/${userId}/stats/songs/${songId}${query}`);
   }
 
-  getSongRankings(userId: number, params: { sort_by?: string; limit?: number } & AnalyticsFilterQuery = {}) {
+  getSongRankings(userId: number, params: { sort_by?: string; sort_order?: "asc" | "desc"; limit?: number } & AnalyticsFilterQuery = {}) {
     const query = new URLSearchParams();
     appendAnalyticsFilters(query, params);
     if (params.sort_by) query.set("sort_by", params.sort_by);
+    if (params.sort_order) query.set("sort_order", params.sort_order);
     if (params.limit) query.set("limit", String(params.limit));
     return this.request<SongRankingsResponse>(`/api/users/${userId}/stats/songs/rankings?${query.toString()}`);
   }

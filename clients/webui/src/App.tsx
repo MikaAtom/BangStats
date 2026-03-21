@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   Link,
   NavLink,
@@ -52,6 +52,7 @@ import {
   formatDifficulty,
   formatEventBoundary,
   formatEventLabel,
+  formatEventLabelDateOnly,
   formatLiveType,
   formatShortDate,
   groupActiveHours,
@@ -64,7 +65,7 @@ type Loadable<T> = {
   error: string | null;
 };
 
-type AnalyticsView = "overview" | "progress" | "milestones" | "songs" | "events" | "recap" | "screenshots";
+type AnalyticsView = "overview" | "progress" | "milestones" | "songs" | "recap" | "screenshots";
 
 type SectionFilterState = {
   difficulty: string;
@@ -79,6 +80,7 @@ type SidebarItem = {
 };
 
 type RecapScope = "weekly" | "monthly" | "seasonal" | "yearly" | "event";
+type SongSortKey = "song_name" | "play_count" | "fc_count" | "ap_count" | "skill_score" | "latest_play";
 
 const DEFAULT_DATE_RANGE: DateRangeValue = {
   preset: "30d",
@@ -86,7 +88,7 @@ const DEFAULT_DATE_RANGE: DateRangeValue = {
   to: "",
 };
 
-const ANALYTICS_VIEWS: AnalyticsView[] = ["overview", "progress", "milestones", "songs", "events", "recap", "screenshots"];
+const ANALYTICS_VIEWS: AnalyticsView[] = ["overview", "progress", "milestones", "songs", "recap", "screenshots"];
 const DIFFICULTY_FILTERS = ["easy", "normal", "hard", "expert", "special"];
 const LIVE_TYPE_FILTERS = ["normal_live", "event_live", "challenge_live", "multi_live", "vs_live", "free_live"];
 const CORRECTION_DIFFICULTIES = ["easy", "normal", "hard", "expert", "special"] as const;
@@ -324,6 +326,44 @@ function resolveAbsoluteDateRange(range: DateRangeValue): StatsRangeQuery | null
     from_date: start.toISOString().slice(0, 10),
     to_date: end.toISOString().slice(0, 10),
   };
+}
+
+function shiftRecapAnchor(scope: Exclude<RecapScope, "event">, current: Date, delta: -1 | 1) {
+  const next = new Date(current);
+  if (scope === "weekly") {
+    next.setDate(next.getDate() + 7 * delta);
+    return next;
+  }
+  if (scope === "monthly") {
+    next.setMonth(next.getMonth() + delta);
+    return next;
+  }
+  if (scope === "seasonal") {
+    next.setMonth(next.getMonth() + 3 * delta);
+    return next;
+  }
+  next.setFullYear(next.getFullYear() + delta);
+  return next;
+}
+
+function recapAnchorLabel(scope: Exclude<RecapScope, "event">, date: Date) {
+  if (scope === "weekly") {
+    const start = new Date(date);
+    const day = start.getDay();
+    const diffToMonday = (day + 6) % 7;
+    start.setDate(start.getDate() - diffToMonday);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return `${formatShortDate(start.toISOString())} -> ${formatShortDate(end.toISOString())}`;
+  }
+  if (scope === "monthly") {
+    return date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  }
+  if (scope === "seasonal") {
+    const season = Math.floor(date.getMonth() / 3) + 1;
+    return `Season ${season} ${date.getFullYear()}`;
+  }
+  return String(date.getFullYear());
 }
 
 function sectionFiltersToQuery(filters: SectionFilterState) {
@@ -1489,7 +1529,6 @@ function StatsPage() {
       {view === "progress" && <ProgressAnalyticsView />}
       {view === "milestones" && <MilestonesAnalyticsView />}
       {view === "songs" && <SongsAnalyticsView />}
-      {view === "events" && <EventsAnalyticsView />}
       {view === "recap" && <RecapAnalyticsView />}
       {view === "screenshots" && <ScreenshotsAnalyticsView />}
     </div>
@@ -1532,23 +1571,10 @@ function OverviewAnalyticsView() {
       </div>
       <div className="layout-two">
         <Card title="Latest milestones">
-          {milestones.data ? <MilestoneTimeline items={milestones.data.milestones.slice(0, 6)} /> : <LoadingInline />}
-        </Card>
-        <Card title="Jump into analysis">
-          <ul className="list">
-            {[
-              ["/stats?view=progress", "Open Progress to inspect skill trend, milestones, and practice periods."],
-              ["/stats?view=milestones", "Open Milestones for a dedicated timeline focused on achievement progression."],
-              ["/stats?view=songs", "Open Songs to search and rank songs with song-specific filters."],
-              ["/stats?view=events", "Open Events to inspect a single event with one event selector."],
-              ["/stats?view=recap", "Open Recap for scoped story views like weekly, monthly, or yearly."],
-              ["/stats?view=screenshots", "Open Screenshots for image-backed browsing with its own filters."],
-            ].map(([to, label]) => (
-              <li key={to}>
-                <Link to={to}>{label}</Link>
-              </li>
-            ))}
-          </ul>
+          {milestones.data ? <MilestoneTimeline items={milestones.data.milestones.slice(0, 2)} /> : <LoadingInline />}
+          <div className="inline-meta">
+            <Link to="/stats?view=milestones">Open full milestone timeline</Link>
+          </div>
         </Card>
       </div>
     </div>
@@ -1574,10 +1600,6 @@ function ProgressAnalyticsView() {
   const progression = useLoadable<ProgressionResponse>(
     auth.user ? () => api.getProgression(auth.user!.id, scope, pointCount, anchorDate, filterQuery) : null,
     [auth.user?.id, scope, pointCount, anchorDate, filters.difficulty, filters.liveType, filters.includeMeta],
-  );
-  const insights = useLoadable<InsightsResponse>(
-    auth.user && customRangeReady ? () => api.getInsights(auth.user!.id, { ...rangeQuery, ...filterQuery }) : null,
-    [auth.user?.id, customRangeReady, range.preset, range.from, range.to, filters.difficulty, filters.liveType, filters.includeMeta],
   );
   const calendar = useLoadable<CalendarResponse>(
     auth.user
@@ -1626,7 +1648,7 @@ function ProgressAnalyticsView() {
       <Card title="Time-window controls">
         <div className="analytics-section-controls">
           <DateRangePicker value={range} onChange={setRange} />
-          <div className="inline-meta">Date range filters Activity summary and Practice patterns. Calendar has its own month selector.</div>
+          <div className="inline-meta">Date range filters Activity summary. Calendar has its own month selector.</div>
         </div>
       </Card>
       <Card title="Skill progression">
@@ -1636,8 +1658,9 @@ function ProgressAnalyticsView() {
         <Card title={activity.data ? `Activity summary (${formatDateRange(activity.data.from_date, activity.data.to_date)})` : "Activity summary"}>
           {activity.data ? <ActivityBars data={activity.data} /> : !customRangeReady ? <EmptyState text="Pick both custom dates to load activity." /> : <LoadingInline />}
         </Card>
-        <Card title="Practice patterns">
-          {insights.data ? <InsightsPanel data={insights.data} /> : !customRangeReady ? <EmptyState text="Pick both custom dates to load practice insights." /> : <LoadingInline />}
+        <Card title="Milestones">
+          <div className="inline-meta">Milestones are now tracked in the dedicated Milestones tab for cleaner trend analysis.</div>
+          <Link className="text-link" to="/stats?view=milestones">Open milestones tab</Link>
         </Card>
       </div>
       <Card
@@ -1695,14 +1718,52 @@ function MilestonesAnalyticsView() {
 function SongsAnalyticsView() {
   const auth = useAuth();
   const [filters, setFilters] = useState<SectionFilterState>({ difficulty: "", liveType: "", includeMeta: false });
-  const [sortBy, setSortBy] = useState("play_count");
+  const [sortBy, setSortBy] = useState<SongSortKey>("play_count");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [limit, setLimit] = useState(80);
   const [searchQuery, setSearchQuery] = useState("");
   const [results, setResults] = useState<Array<{ song_id: number; song_name: string }>>([]);
   const filterQuery = sectionFiltersToQuery(filters);
   const rankings = useLoadable<SongRankingsResponse>(
-    auth.user ? () => api.getSongRankings(auth.user!.id, { ...filterQuery, sort_by: sortBy, limit: 40 }) : null,
-    [auth.user?.id, sortBy, filters.difficulty, filters.liveType, filters.includeMeta],
+    auth.user ? () => api.getSongRankings(auth.user!.id, { ...filterQuery, sort_by: sortBy, sort_order: sortOrder, limit }) : null,
+    [auth.user?.id, sortBy, sortOrder, limit, filters.difficulty, filters.liveType, filters.includeMeta],
   );
+
+  const displayRankings = useMemo(() => {
+    if (!rankings.data) return null;
+    const items = [...rankings.data.items];
+    const factor = sortOrder === "asc" ? 1 : -1;
+    const toTs = (value?: string | null) => {
+      if (!value) return 0;
+      const ts = new Date(value).getTime();
+      return Number.isFinite(ts) ? ts : 0;
+    };
+
+    items.sort((a, b) => {
+      if (sortBy === "song_name") {
+        const lhs = (a.song_name || `Song #${a.song_id}`).toLowerCase();
+        const rhs = (b.song_name || `Song #${b.song_id}`).toLowerCase();
+        return lhs.localeCompare(rhs) * factor;
+      }
+      if (sortBy === "latest_play") {
+        return (toTs(a.latest_play?.timestamp) - toTs(b.latest_play?.timestamp)) * factor;
+      }
+      return ((Number(a[sortBy]) || 0) - (Number(b[sortBy]) || 0)) * factor;
+    });
+
+    return { ...rankings.data, items };
+  }, [rankings.data, sortBy, sortOrder]);
+
+  useEffect(() => {
+    function onScroll() {
+      if (rankings.loading || !rankings.data || rankings.data.items.length < limit) return;
+      const nearBottom = window.innerHeight + window.scrollY >= document.body.offsetHeight - 300;
+      if (!nearBottom) return;
+      setLimit((current) => current + 80);
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [rankings.loading, rankings.data, limit]);
 
   if (!auth.user) return null;
 
@@ -1735,11 +1796,20 @@ function SongsAnalyticsView() {
             </label>
             <label className="field inline-field">
               <span>Sort songs by</span>
-              <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+              <select value={sortBy} onChange={(event) => setSortBy(event.target.value as SongSortKey)}>
                 <option value="play_count">Plays</option>
                 <option value="skill_score">Skill score</option>
                 <option value="fc_count">FC count</option>
                 <option value="ap_count">AP count</option>
+                <option value="song_name">Song name</option>
+                <option value="latest_play">Latest</option>
+              </select>
+            </label>
+            <label className="field inline-field">
+              <span>Order</span>
+              <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value as "asc" | "desc")}>
+                <option value="desc">Descending</option>
+                <option value="asc">Ascending</option>
               </select>
             </label>
             <SectionFilterControls filters={filters} onChange={setFilters} />
@@ -1756,7 +1826,26 @@ function SongsAnalyticsView() {
         </div>
       </Card>
       <Card title="Song rankings">
-        {rankings.data ? <SongRankingsTable data={rankings.data} /> : <LoadingInline />}
+        {displayRankings ? (
+          <SongRankingsTable
+            data={displayRankings}
+            sortBy={sortBy}
+            sortOrder={sortOrder}
+            onSort={(nextKey) => {
+              if (nextKey === sortBy) {
+                setSortOrder((current) => (current === "asc" ? "desc" : "asc"));
+                return;
+              }
+              setSortBy(nextKey);
+              setSortOrder("desc");
+            }}
+          />
+        ) : (
+          <LoadingInline />
+        )}
+        {rankings.data && rankings.data.items.length >= limit && (
+          <div className="inline-meta">Scroll down to load more songs.</div>
+        )}
       </Card>
     </div>
   );
@@ -1831,6 +1920,7 @@ function RecapAnalyticsView() {
   const [scope, setScope] = useState<RecapScope>("monthly");
   const [anchorDate, setAnchorDate] = useState(() => new Date());
   const [selectedEventId, setSelectedEventId] = useState("");
+  const [eventQuery, setEventQuery] = useState("");
   const [filters, setFilters] = useState<SectionFilterState>({ difficulty: "", liveType: "", includeMeta: false });
   const events = useLoadable(auth.user ? () => api.getReferenceEvents(1200) : null, [auth.user?.id]);
   const filterQuery = sectionFiltersToQuery(filters);
@@ -1853,10 +1943,14 @@ function RecapAnalyticsView() {
     .slice()
     .sort((a, b) => Number(b.event_id || b.id || 0) - Number(a.event_id || a.id || 0))
     .slice(0, 48);
+  const eventOptions = recentEvents.map((event) => ({
+    id: String(event.event_id || event.id || ""),
+    label: formatEventLabelDateOnly(event, auth.user!.server),
+  }));
 
   return (
     <div className="page-grid">
-      <Card title="Recap controls">
+      <Card title="Recap and event controls">
         <div className="analytics-filter-row">
           <label className="field inline-field">
             <span>Scope</span>
@@ -1870,25 +1964,33 @@ function RecapAnalyticsView() {
           </label>
           {scope === "event" ? (
             <label className="field">
-              <span>Event</span>
-              <select value={selectedEventId} onChange={(event) => setSelectedEventId(event.target.value)}>
-                <option value="">Select event</option>
-                {recentEvents.map((event) => (
-                  <option key={String(event.event_id || event.id)} value={String(event.event_id || event.id)}>
-                    {formatEventLabel(event, auth.user!.server)}
-                  </option>
+              <span>Event (search)</span>
+              <input
+                list="recap-event-options"
+                value={eventQuery}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  setEventQuery(nextValue);
+                  const match = eventOptions.find((item) => item.label === nextValue);
+                  setSelectedEventId(match ? match.id : "");
+                }}
+                placeholder="Search event by name/date"
+              />
+              <datalist id="recap-event-options">
+                {eventOptions.map((option) => (
+                  <option key={option.id} value={option.label} />
                 ))}
-              </select>
+              </datalist>
             </label>
           ) : (
             <div className="button-row tight analytics-month-nav">
-              <button className="button ghost" type="button" onClick={() => setAnchorDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}>
+              <button className="button ghost" type="button" onClick={() => setAnchorDate((prev) => shiftRecapAnchor(scope, prev, -1))}>
                 Prev
               </button>
               <div className="toolbar-chip">
-                {anchorDate.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+                {recapAnchorLabel(scope, anchorDate)}
               </div>
-              <button className="button ghost" type="button" onClick={() => setAnchorDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}>
+              <button className="button ghost" type="button" onClick={() => setAnchorDate((prev) => shiftRecapAnchor(scope, prev, 1))}>
                 Next
               </button>
             </div>
@@ -2514,19 +2616,33 @@ function RecentPlayList({
   );
 }
 
-function SongRankingsTable({ data }: { data: SongRankingsResponse }) {
+function SongRankingsTable({
+  data,
+  sortBy,
+  sortOrder,
+  onSort,
+}: {
+  data: SongRankingsResponse;
+  sortBy: SongSortKey;
+  sortOrder: "asc" | "desc";
+  onSort: (key: SongSortKey) => void;
+}) {
   if (!data.items.length) return <EmptyState text="No ranked songs found for the current filters." />;
+  function sortLabel(key: SongSortKey, title: string) {
+    return sortBy === key ? `${title} ${sortOrder === "asc" ? "↑" : "↓"}` : title;
+  }
+
   return (
     <div className="table-wrap">
       <table className="data-table">
         <thead>
           <tr>
-            <th>Song</th>
-            <th>Plays</th>
-            <th>FC</th>
-            <th>AP</th>
-            <th>Skill</th>
-            <th>Latest</th>
+            <th><button className="button ghost" type="button" onClick={() => onSort("song_name")}>{sortLabel("song_name", "Song")}</button></th>
+            <th><button className="button ghost" type="button" onClick={() => onSort("play_count")}>{sortLabel("play_count", "Plays")}</button></th>
+            <th><button className="button ghost" type="button" onClick={() => onSort("fc_count")}>{sortLabel("fc_count", "FC")}</button></th>
+            <th><button className="button ghost" type="button" onClick={() => onSort("ap_count")}>{sortLabel("ap_count", "AP")}</button></th>
+            <th><button className="button ghost" type="button" onClick={() => onSort("skill_score")}>{sortLabel("skill_score", "Skill")}</button></th>
+            <th><button className="button ghost" type="button" onClick={() => onSort("latest_play")}>{sortLabel("latest_play", "Latest")}</button></th>
           </tr>
         </thead>
         <tbody>
