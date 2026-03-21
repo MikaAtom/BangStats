@@ -5,7 +5,7 @@ def test_server_parser_defaults():
     args = build_parser().parse_args([])
 
     assert args.host == "0.0.0.0"
-    assert args.port == 8000
+    assert args.port == 8010
     assert args.reload is False
     assert args.flush_remote_cache is False
     assert args.flush_scan_cache is False

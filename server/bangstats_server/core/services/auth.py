@@ -3,7 +3,9 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 
 import bcrypt
+from sqlalchemy.exc import OperationalError
 
+from bangstats_server.core.db import reset_db_engine
 from bangstats_server.core.db.models.user import User
 from bangstats_server.core.db.repositories.token_repository import TokenRepository
 from bangstats_server.core.services.user import UserService
@@ -78,9 +80,21 @@ class AuthService:
         token_value = secrets.token_urlsafe(32)
         now = self._utc_now_naive()
         expires_at = now + timedelta(days=TOKEN_TTL_DAYS)
-        with TokenRepository() as repo:
-            repo.delete_expired(now=now)
-            repo.create(token=token_value, user_id=user_id, expires_at=expires_at)
+
+        for attempt in range(2):
+            try:
+                with TokenRepository() as repo:
+                    repo.delete_expired(now=now)
+                    repo.create(token=token_value, user_id=user_id, expires_at=expires_at)
+                return token_value
+            except OperationalError as exc:
+                # SQLite can hold stale read-only connections after local file churn.
+                # Rebuild the engine and retry once before surfacing the failure.
+                is_readonly = "readonly" in str(exc).lower()
+                if not is_readonly or attempt > 0:
+                    raise
+                reset_db_engine()
+
         return token_value
 
     def register(

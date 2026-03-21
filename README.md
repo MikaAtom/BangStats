@@ -24,15 +24,19 @@ Ukrainian README: [README_uk.md](README_uk.md)
 
 ## Run
 Start server:
-- `uv run bangstats server`
+- `uv run bangstats server --host 127.0.0.1 --port 8010`
 
 Start CLI client (in another terminal):
-- `uv run bangstats client`
+- `uv run bangstats client --server-url http://127.0.0.1:8010`
 
 Start web UI (in another terminal):
 - `cd clients/webui`
 - `npm install`
 - `npm run dev`
+
+Start full stack with one command:
+- `uv run python scripts/dev_stack.py`
+- Optional CLI auto-start: `uv run python scripts/dev_stack.py --with-cli`
 
 You can also run the legacy direct client script:
 - `uv run bangstats-client`
@@ -53,7 +57,7 @@ Examples:
 
 ### Common command examples
 - Server custom host/port:
-  - `uv run bangstats server --host 127.0.0.1 --port 8000`
+  - `uv run bangstats server --host 127.0.0.1 --port 8010`
 - Server reload mode:
   - `uv run bangstats server --reload`
 - Client with prefilled login defaults:
@@ -110,3 +114,10 @@ tests/                     # test suite
 ## Notes
 - This is a pet project: structure is intentionally lightweight.
 - Keep boundaries strict: client talks to server via HTTP only.
+
+## Docs index
+- Agent architecture guide: [docs/AGENT_GUIDE.md](docs/AGENT_GUIDE.md)
+- Development runbook: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+
+Quick smoke check:
+- `uv run python scripts/smoke_verify.py`

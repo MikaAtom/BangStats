@@ -81,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="BangStats API Server",
     )
     parser.add_argument("--host", default="0.0.0.0", help="Host for uvicorn server.")
-    parser.add_argument("--port", type=int, default=8000, help="Port for uvicorn server.")
+    parser.add_argument("--port", type=int, default=8010, help="Port for uvicorn server.")
     parser.add_argument(
         "--reload",
         action="store_true",

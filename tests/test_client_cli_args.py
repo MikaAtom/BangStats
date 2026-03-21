@@ -3,7 +3,7 @@ from bangstats_cli.app import build_parser
 
 def test_client_parser_defaults():
     args = build_parser().parse_args([])
-    assert args.server_url == "http://localhost:8000"
+    assert args.server_url == "http://localhost:8010"
     assert args.username is None
     assert args.game_id is None
     assert args.server is None

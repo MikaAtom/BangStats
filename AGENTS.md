@@ -1,20 +1,29 @@
-# BangStats Agent Notes
+# BangStats Agent Guide
 
-## Product parity
-- The CLI and Web UI must stay 1 to 1 in user-visible functionality.
-- Any feature added to the CLI must also be added to the Web UI.
-- Any feature added to the Web UI must also be available from the CLI, unless the feature is strictly visual presentation on top of existing data.
-- If parity is temporarily broken during implementation, restore it before considering the work complete.
+This guide is for models and automation agents working in this repository.
 
-## Architecture boundary
-- Clients must talk to the server over HTTP only.
-- Do not import server core modules directly into client applications.
-- Prefer additive API changes when the clients need shared capabilities.
+## Architecture
+- Server: FastAPI application in [server/bangstats_server](server/bangstats_server)
+- CLI: terminal client in [clients/cli/bangstats_cli](clients/cli/bangstats_cli)
+- Web UI: React app in [clients/webui/src](clients/webui/src)
+- Rule: clients must access server features over HTTP only
 
-## Web UI expectations
-- The web app should cover the full operational surface of the CLI.
-- Visual additions such as screenshot viewers, charts, and calendars are allowed on top of parity, but they must not replace existing CLI workflows.
+## Canonical Runtime
+- API default target: http://127.0.0.1:8010
+- Server start: `uv run bangstats server --host 127.0.0.1 --port 8010`
+- CLI start: `uv run bangstats client --server-url http://127.0.0.1:8010`
+- Web UI start: from [clients/webui](clients/webui), run `npm run dev`
+- One-command stack: `uv run python scripts/dev_stack.py`
 
-## Python tooling
-- Use `uv` for Python execution, tests, and tooling commands (for example, `uv run pytest -q`).
-- Do not rely on manual `.venv` activation in agent instructions or runbooks.
+## Primary Code Surfaces
+- API routes: [server/bangstats_server/api/routers](server/bangstats_server/api/routers)
+- Schemas: [server/bangstats_server/api/schemas](server/bangstats_server/api/schemas)
+- Server config: [server/bangstats_server/core/config.py](server/bangstats_server/core/config.py)
+- CLI entrypoint: [clients/cli/bangstats_cli/dispatcher.py](clients/cli/bangstats_cli/dispatcher.py)
+- Web API adapter: [clients/webui/src/api.ts](clients/webui/src/api.ts)
+
+## Guardrails
+- Keep CLI and Web UI user-visible functionality in parity.
+- Keep [AGENTS.md](AGENTS.md) authoritative for repo-wide behavior.
+- Use `uv` commands for Python workflows.
+- Do not rely on manual virtualenv activation in runbooks.

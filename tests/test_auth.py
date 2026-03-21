@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
+import sqlite3
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import OperationalError
 
 from bangstats_server.api.routers import auth as auth_router
 from bangstats_server.app import app
@@ -218,3 +220,38 @@ def test_login_rate_limiting_returns_429_after_five_failures(client: TestClient)
     )
     assert blocked.status_code == 429
     assert blocked.json()["detail"] == "Too many login attempts"
+
+
+def test_issue_token_retries_on_sqlite_readonly(monkeypatch: pytest.MonkeyPatch):
+    rate_limiter = LoginRateLimiter()
+    service = AuthService(rate_limiter=rate_limiter)
+
+    calls = {"create": 0, "reset": 0}
+
+    class _Repo:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return None
+
+        def delete_expired(self, *, now):
+            return 0
+
+        def create(self, *, token, user_id, expires_at):
+            calls["create"] += 1
+            if calls["create"] == 1:
+                raise OperationalError("INSERT", {}, sqlite3.OperationalError("attempt to write a readonly database"))
+            return None
+
+    def _reset_engine():
+        calls["reset"] += 1
+
+    monkeypatch.setattr("bangstats_server.core.services.auth.TokenRepository", _Repo)
+    monkeypatch.setattr("bangstats_server.core.services.auth.reset_db_engine", _reset_engine)
+
+    token = service.issue_token(user_id=1)
+
+    assert isinstance(token, str) and token
+    assert calls["create"] == 2
+    assert calls["reset"] == 1

@@ -33,14 +33,11 @@ import {
   type RecapResponse,
   type ReferenceSongItem,
   type SongRankingsResponse,
-  type ScanJob,
   type ScanResult,
-  type ScreenshotItem,
   type SongJourneyResponse,
   type SongStatsResponse,
   type StatsOverview,
   type SyncJob,
-  type UploadFileItem,
   type User,
 } from "./api";
 
@@ -53,7 +50,6 @@ import {
   formatDateTime,
   formatDifficulty,
   formatEventBoundary,
-  formatEventLabel,
   formatEventLabelDateOnly,
   formatLiveType,
   formatShortDate,
