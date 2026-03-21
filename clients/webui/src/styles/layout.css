@@ -186,7 +186,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
-  align-items: end;
+  align-items: start;
 }
 
 .song-search-field {

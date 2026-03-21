@@ -32,16 +32,7 @@ def _build_recap_daily_digest(
     plays: List[Any],
     from_date: date,
     to_date: date,
-    sessions: List[List[Any]],
 ) -> List[Dict[str, Any]]:
-    session_starts: Dict[date, int] = defaultdict(int)
-    for session in sessions:
-        si = _to_session_item(session)
-        sa = si.get("started_at")
-        if isinstance(sa, datetime):
-            d = sa.date()
-            if from_date <= d <= to_date:
-                session_starts[d] += 1
     by_day: Dict[date, Dict[str, Any]] = defaultdict(
         lambda: {"plays": 0, "fc": 0, "ap": 0, "perfect": 0, "notes": 0}
     )
@@ -74,7 +65,6 @@ def _build_recap_daily_digest(
                 "fc": int(b["fc"]),
                 "ap": int(b["ap"]),
                 "accuracy": acc,
-                "sessions": int(session_starts.get(cur, 0)),
             }
         )
         cur += timedelta(days=1)
@@ -1173,9 +1163,8 @@ def compute_recap(
         if int(getattr(play, "song_id", 0)) > 0
     }
     new_song_rows = [row for row in top_song_rows if row["song_id"] not in prior_song_ids][:8]
-    sessions = _sessionize_plays(plays, session_gap_minutes=45)
     milestones = compute_milestones(plays)
-    daily_digest = _build_recap_daily_digest(plays, from_date, to_date, sessions)
+    daily_digest = _build_recap_daily_digest(plays, from_date, to_date)
     highlights: List[Dict[str, Any]] = []
     if top_song_rows:
         highlights.append(
@@ -1271,10 +1260,5 @@ def compute_recap(
         "streaks": {
             "best_daily": milestones.get("best_streak_days", 0),
             "current_daily": milestones.get("current_streak_days", 0),
-            "longest_session_plays": max([_to_session_item(session)["plays"] for session in sessions], default=0),
-        },
-        "sessions": {
-            "total_sessions": len(sessions),
-            "longest_session_minutes": max([_to_session_item(session)["duration_minutes"] for session in sessions], default=0),
         },
     }

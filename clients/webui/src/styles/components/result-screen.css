@@ -151,43 +151,48 @@
   color: #ffb4b4;
 }
 
-.journey-chain {
-  display: flex;
-  gap: 0.5rem;
-  overflow-x: auto;
-  padding: 0.5rem 0;
-  scroll-snap-type: x mandatory;
+.journey-timeline {
+  gap: var(--space-3);
 }
 
-.journey-node {
-  flex: 0 0 160px;
-  scroll-snap-align: start;
-  border: 1px solid var(--border, #333);
-  border-radius: 10px;
-  padding: 0.5rem;
-  background: var(--card, #1a1a1c);
+.journey-timeline__item {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  padding: 0;
+  color: inherit;
+  font: inherit;
   cursor: pointer;
   text-align: left;
 }
 
-.journey-node__rail {
+.journey-timeline__item.active {
+  border-color: var(--border-purple);
+  background: var(--bg-primary);
+}
+
+.journey-timeline__content {
+  padding-bottom: var(--space-3);
+}
+
+.journey-timeline__head {
   display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin-bottom: 0.35rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
 }
 
-.journey-node__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent, #7c5cff);
+.journey-timeline__head strong {
+  display: block;
+  margin-top: var(--space-1);
 }
 
-.journey-node__line {
-  flex: 1;
-  height: 2px;
-  background: rgba(255, 255, 255, 0.12);
+.journey-timeline__image {
+  width: 100%;
+  max-width: 320px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
 }
 
 .recap-daily-table {

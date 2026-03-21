@@ -465,10 +465,8 @@ export type RecapResponse = {
     fc: number;
     ap: number;
     accuracy: number;
-    sessions: number;
   }>;
   streaks: Record<string, number>;
-  sessions: Record<string, number>;
   exclusion_context: {
     server_meta_song_ids: number[];
     user_excluded_song_ids: number[];

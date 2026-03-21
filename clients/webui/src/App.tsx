@@ -45,7 +45,7 @@ import {
 
 import { Card, MetricCard, LoadingCard, LoadingInline, EmptyState, SectionHeader, SecureImage, DateRangePicker, type DateRangeValue } from "./components/ui";
 import { KeyValueList, JobList } from "./components/data-display";
-import { BarChart, ActivityBars, CalendarHeatmap, TrendChart } from "./components/charts";
+import { BarChart, ActivityBars, TrendChart } from "./components/charts";
 import { UploadGallery, ScreenshotGallery } from "./components/galleries";
 import {
   formatDateRange,
@@ -63,6 +63,11 @@ import {
 import { dateRangeToQuery, resolveAbsoluteDateRange, sectionFiltersToQuery, type SectionFilterState } from "./stats/statsQuery";
 import { recapNavLabel, stepRecapAnchor, type RecapScope } from "./stats/recapNav";
 import { CompactScreenshotCard, ScreenshotModal, type ScreenshotModalItem } from "./components/screenshots/ScreenshotModal";
+import {
+  CalendarExplorerModal,
+  calendarRangeForMode,
+  type CalendarExplorerMode,
+} from "./components/calendar/CalendarExplorerModal";
 
 type AnalyticsView = "overview" | "progress" | "milestones" | "songs" | "recap" | "screenshots";
 
@@ -1502,8 +1507,8 @@ function ProgressAnalyticsView() {
   const [pointCount, setPointCount] = useState(8);
   const [filters, setFilters] = useState<SectionFilterState>({ difficulty: "", liveType: "", includeMeta: false });
   const [calendarDate, setCalendarDate] = useState(() => new Date());
-  const [calMode, setCalMode] = useState<"day" | "week" | "month" | "year">("month");
-  const [exploreDay, setExploreDay] = useState<string | null>(null);
+  const [calMode, setCalMode] = useState<CalendarExplorerMode>("month");
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const customRangeReady = range.preset !== "custom" || (Boolean(range.from) && Boolean(range.to));
   const filterQuery = sectionFiltersToQuery(filters);
   const rangeQuery = dateRangeToQuery(range);
@@ -1512,8 +1517,9 @@ function ProgressAnalyticsView() {
   useEffect(() => {
     const d = searchParams.get("calDay");
     if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-      setExploreDay(d);
+      setCalendarDate(new Date(`${d}T00:00:00`));
       setCalMode("day");
+      setCalendarOpen(true);
     }
   }, [searchParams]);
 
@@ -1526,29 +1532,28 @@ function ProgressAnalyticsView() {
     [auth.user?.id, scope, pointCount, anchorDate, filters.difficulty, filters.liveType, filters.includeMeta],
   );
   const calendar = useLoadable<CalendarResponse>(
-    auth.user && (calMode === "month" || calMode === "week")
+    auth.user && calendarOpen && (calMode === "month" || calMode === "week" || calMode === "day")
       ? () => api.getCalendar(auth.user!.id, calendarDate.getFullYear(), calendarDate.getMonth() + 1, filterQuery)
       : null,
-    [auth.user?.id, calendarDate.getFullYear(), calendarDate.getMonth(), filters.difficulty, filters.liveType, filters.includeMeta, calMode],
+    [auth.user?.id, calendarOpen, calendarDate.getFullYear(), calendarDate.getMonth(), filters.difficulty, filters.liveType, filters.includeMeta, calMode],
   );
   const yearCal = useLoadable<CalendarYearResponse>(
-    auth.user && calMode === "year" ? () => api.getCalendarYear(auth.user!.id, calendarDate.getFullYear(), filterQuery) : null,
-    [auth.user?.id, calendarDate.getFullYear(), filters.difficulty, filters.liveType, filters.includeMeta, calMode],
+    auth.user && calendarOpen && calMode === "year" ? () => api.getCalendarYear(auth.user!.id, calendarDate.getFullYear(), filterQuery) : null,
+    [auth.user?.id, calendarOpen, calendarDate.getFullYear(), filters.difficulty, filters.liveType, filters.includeMeta, calMode],
   );
-  const dayShots = useLoadable(
-    auth.user && calMode === "day" && exploreDay
+  const calendarShots = useLoadable(
+    auth.user && calendarOpen && calMode !== "year"
       ? () =>
           api.listScreenshots(auth.user!.id, {
             ...filterQuery,
-            from_date: exploreDay,
-            to_date: exploreDay,
-            limit: 80,
+            ...calendarRangeForMode(calMode, calendarDate),
+            limit: calMode === "day" ? 80 : 240,
             offset: 0,
             sort_by: "timestamp",
             sort_order: "desc",
           })
       : null,
-    [auth.user?.id, calMode, exploreDay, filters.difficulty, filters.liveType, filters.includeMeta],
+    [auth.user?.id, calendarOpen, calMode, calendarDate.getFullYear(), calendarDate.getMonth(), calendarDate.getDate(), filters.difficulty, filters.liveType, filters.includeMeta],
   );
 
   if (!auth.user) return null;
@@ -1607,105 +1612,42 @@ function ProgressAnalyticsView() {
       </Card>
       <Card
         title="Calendar explorer"
+        subtitle="Open the shared year / month / week / day modal for the same filters used by the charts."
         actions={
           <div className="button-row tight">
-            <label className="field inline-field">
-              <span>Mode</span>
-              <select
-                value={calMode}
-                onChange={(event) => setCalMode(event.target.value as typeof calMode)}
-              >
-                <option value="day">Day</option>
-                <option value="week">Week</option>
-                <option value="month">Month</option>
-                <option value="year">Year</option>
-              </select>
-            </label>
-            {calMode !== "year" && (
-              <>
-                <button className="button ghost" type="button" onClick={() => setCalendarDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}>
-                  Prev
-                </button>
-                <div className="toolbar-chip">
-                  {calendarDate.toLocaleDateString(webLocale(server), { month: "long", year: "numeric" })}
-                </div>
-                <button className="button ghost" type="button" onClick={() => setCalendarDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}>
-                  Next
-                </button>
-              </>
-            )}
-            {calMode === "year" && (
-              <div className="button-row tight">
-                <button className="button ghost" type="button" onClick={() => setCalendarDate((prev) => new Date(prev.getFullYear() - 1, 0, 1))}>
-                  Prev year
-                </button>
-                <div className="toolbar-chip">{calendarDate.getFullYear()}</div>
-                <button className="button ghost" type="button" onClick={() => setCalendarDate((prev) => new Date(prev.getFullYear() + 1, 0, 1))}>
-                  Next year
-                </button>
-              </div>
-            )}
+            <button className="button primary" type="button" onClick={() => setCalendarOpen(true)}>
+              Open calendar
+            </button>
           </div>
         }
       >
-        <p className="inline-meta" style={{ margin: "0 0 0.85rem" }}>
-          Switch <strong>mode</strong> and navigate months or years. Click a day for screenshots. Uses the same play filters as <strong>Skill trend</strong>.{" "}
-          <Link to="/stats?view=milestones">Full milestone timeline</Link>
-        </p>
-        {calMode === "month" && (calendar.data ? <CalendarHeatmap data={calendar.data} onDayClick={(iso) => {
-          setExploreDay(iso);
-          setCalMode("day");
-          const p = new URLSearchParams(searchParams);
-          p.set("view", "progress");
-          p.set("calDay", iso);
-          setSearchParams(p, { replace: true });
-        }} /> : <LoadingInline />)}
-        {calMode === "year" &&
-          (yearCal.data ? (
-            <div className="stats-grid compact">
-              {yearCal.data.months.map((m) => (
-                <button
-                  key={m.month}
-                  type="button"
-                  className="button ghost"
-                  onClick={() => {
-                    setCalendarDate(new Date(yearCal.data!.year, m.month - 1, 1));
-                    setCalMode("month");
-                  }}
-                >
-                  {new Date(yearCal.data!.year, m.month - 1, 1).toLocaleDateString(webLocale(server), { month: "short" })} · {m.plays} plays
-                </button>
-              ))}
-            </div>
-          ) : (
-            <LoadingInline />
-          ))}
-        {calMode === "week" && calendar.data && (
+        <div className="stack">
           <div className="inline-meta">
-            Week strip uses the current month grid — select a day to switch to Day mode with plays for that date.
+            Current mode: <strong>{formatDifficulty(calMode)}</strong> · Anchor:{" "}
+            <strong>{calendarDate.toLocaleDateString(webLocale(server), { month: "long", day: "numeric", year: "numeric" })}</strong>
           </div>
-        )}
-        {calMode === "day" && (
-          <div className="stack">
-            <label className="field inline-field">
-              <span>Day</span>
-              <input
-                type="date"
-                value={exploreDay || ""}
-                onChange={(event) => {
-                  const v = event.target.value;
-                  setExploreDay(v);
-                  const p = new URLSearchParams(searchParams);
-                  p.set("view", "progress");
-                  p.set("calDay", v);
-                  setSearchParams(p, { replace: true });
-                }}
-              />
-            </label>
-            {dayShots.data ? <ScreenshotGallery items={dayShots.data.items} server={server} /> : <LoadingInline />}
+          <div className="inline-meta">
+            Progress uses the same play filters as <strong>Skill trend</strong>. The modal loads month, year, and day data on demand instead of keeping a large explorer on the page.
           </div>
-        )}
+          <div className="button-row tight">
+            <Link to="/stats?view=milestones">Full milestone timeline</Link>
+          </div>
+        </div>
       </Card>
+      <CalendarExplorerModal
+        open={calendarOpen}
+        title="Progress calendar"
+        subtitle="Shared explorer for chart drilldown."
+        server={server}
+        mode={calMode as CalendarExplorerMode}
+        anchorDate={calendarDate}
+        onModeChange={(next) => setCalMode(next)}
+        onAnchorDateChange={setCalendarDate}
+        onClose={() => setCalendarOpen(false)}
+        yearData={yearCal.data}
+        monthData={calendar.data}
+        shots={calendarShots.data?.items ?? null}
+      />
     </div>
   );
 }
@@ -1744,6 +1686,7 @@ function SongsAnalyticsView() {
   const [results, setResults] = useState<Array<{ song_id: number; song_name: string }>>([]);
   const [rows, setRows] = useState<SongRankingsResponse["items"]>([]);
   const [totalRanked, setTotalRanked] = useState(0);
+  const [loadingRankings, setLoadingRankings] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const filterQuery = sectionFiltersToQuery(filters);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -1757,8 +1700,7 @@ function SongsAnalyticsView() {
   useEffect(() => {
     if (!auth.user) return;
     let cancelled = false;
-    setRows([]);
-    setTotalRanked(0);
+    setLoadingRankings(true);
     void (async () => {
       try {
         const first = await api.getSongRankings(auth.user!.id, { ...filterQuery, sort_by: sortBy, limit: pageSize, offset: 0 });
@@ -1770,6 +1712,8 @@ function SongsAnalyticsView() {
           setRows([]);
           setTotalRanked(0);
         }
+      } finally {
+        if (!cancelled) setLoadingRankings(false);
       }
     })();
     return () => {
@@ -1778,7 +1722,7 @@ function SongsAnalyticsView() {
   }, [auth.user?.id, sortBy, filters.difficulty, filters.liveType, filters.includeMeta]);
 
   const loadMore = useCallback(async () => {
-    if (!auth.user || loadingMore || rows.length >= totalRanked) return;
+    if (!auth.user || loadingRankings || loadingMore || rows.length >= totalRanked) return;
     setLoadingMore(true);
     try {
       const next = await api.getSongRankings(auth.user.id, {
@@ -1793,7 +1737,7 @@ function SongsAnalyticsView() {
     } finally {
       setLoadingMore(false);
     }
-  }, [auth.user, filterQuery, loadingMore, rows.length, sortBy, totalRanked]);
+  }, [auth.user, filterQuery, loadingMore, loadingRankings, rows.length, sortBy, totalRanked]);
 
   useEffect(() => {
     const el = sentinelRef.current;
@@ -1859,6 +1803,7 @@ function SongsAnalyticsView() {
           onSort={toggleSort}
           total={totalRanked}
           server={auth.user.server}
+          loading={loadingRankings}
         />
         <div ref={sentinelRef} style={{ height: 1 }} />
         {loadingMore && <LoadingInline />}
@@ -1871,11 +1816,13 @@ function RecapAnalyticsView() {
   const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const readScope = (value: string | null): RecapScope => {
-    if (value === "weekly" || value === "monthly" || value === "seasonal" || value === "yearly" || value === "event") return value;
+    if (value === "weekly" || value === "monthly" || value === "yearly" || value === "event") return value;
     return "monthly";
   };
   const [scope, setScope] = useState<RecapScope>(() => readScope(searchParams.get("scope")));
   const [anchorDate, setAnchorDate] = useState(() => new Date());
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarMode, setCalendarMode] = useState<CalendarExplorerMode>("month");
   const [selectedEventId, setSelectedEventId] = useState("");
   const [eventSearch, setEventSearch] = useState("");
   const [filters, setFilters] = useState<SectionFilterState>({ difficulty: "", liveType: "", includeMeta: false });
@@ -1885,6 +1832,10 @@ function RecapAnalyticsView() {
   useEffect(() => {
     setScope(readScope(searchParams.get("scope")));
   }, [searchParams]);
+
+  useEffect(() => {
+    setCalendarMode(scope === "yearly" ? "year" : "month");
+  }, [scope]);
 
   const recapGeneral = useLoadable<RecapResponse>(
     auth.user && scope !== "event"
@@ -1900,12 +1851,61 @@ function RecapAnalyticsView() {
     [auth.user?.id, scope, selectedEventId, filters.difficulty, filters.liveType, filters.includeMeta],
   );
 
+  const recapExplorerRange = scope === "event" && recapEvent.data
+    ? { from_date: recapEvent.data.from_date, to_date: recapEvent.data.to_date }
+    : calendarRangeForMode(calendarMode, anchorDate);
+
+  const recapCalendarMonth = useLoadable<CalendarResponse>(
+    auth.user && calendarOpen && (calendarMode === "month" || calendarMode === "week" || calendarMode === "day")
+      ? () => api.getCalendar(auth.user!.id, anchorDate.getFullYear(), anchorDate.getMonth() + 1, filterQuery)
+      : null,
+    [auth.user?.id, calendarOpen, calendarMode, anchorDate.getFullYear(), anchorDate.getMonth(), filters.difficulty, filters.liveType, filters.includeMeta],
+  );
+
+  const recapCalendarYear = useLoadable<CalendarYearResponse>(
+    auth.user && calendarOpen && calendarMode === "year" ? () => api.getCalendarYear(auth.user!.id, anchorDate.getFullYear(), filterQuery) : null,
+    [auth.user?.id, calendarOpen, calendarMode, anchorDate.getFullYear(), filters.difficulty, filters.liveType, filters.includeMeta],
+  );
+
+  const recapCalendarShots = useLoadable(
+    auth.user && calendarOpen && calendarMode !== "year"
+      ? () =>
+          api.listScreenshots(auth.user!.id, {
+            ...filterQuery,
+            ...recapExplorerRange,
+            limit: calendarMode === "day" ? 80 : 240,
+            offset: 0,
+            sort_by: "timestamp",
+            sort_order: "desc",
+          })
+      : null,
+    [
+      auth.user?.id,
+      calendarOpen,
+      calendarMode,
+      anchorDate.getFullYear(),
+      anchorDate.getMonth(),
+      anchorDate.getDate(),
+      recapExplorerRange.from_date,
+      recapExplorerRange.to_date,
+      filters.difficulty,
+      filters.liveType,
+      filters.includeMeta,
+    ],
+  );
+
   const eventStats = useLoadable<EventStatsResponse>(
     auth.user && scope === "event" && Boolean(selectedEventId)
       ? () => api.getEventStats(auth.user!.id, Number(selectedEventId), filterQuery)
       : null,
     [auth.user?.id, scope, selectedEventId, filters.difficulty, filters.liveType, filters.includeMeta],
   );
+
+  useEffect(() => {
+    if (scope === "event" && recapEvent.data?.from_date) {
+      setAnchorDate(new Date(`${recapEvent.data.from_date}T00:00:00`));
+    }
+  }, [scope, recapEvent.data?.from_date]);
 
   if (!auth.user) return null;
   const server = auth.user.server;
@@ -1928,7 +1928,15 @@ function RecapAnalyticsView() {
 
   return (
     <div className="page-grid">
-      <Card title="Recap controls">
+      <Card
+        title="Recap controls"
+        subtitle="Scope, filters, and the shared calendar modal stay fixed while the recap data changes."
+        actions={
+          <button className="button primary" type="button" disabled={scope === "event" && !selectedEventId} onClick={() => setCalendarOpen(true)}>
+            Open calendar
+          </button>
+        }
+      >
         <div className="analytics-filter-row">
           <label className="field inline-field">
             <span>Scope</span>
@@ -1938,7 +1946,7 @@ function RecapAnalyticsView() {
                 updateScope(event.target.value as RecapScope);
               }}
             >
-              {(["weekly", "monthly", "seasonal", "yearly", "event"] as const).map((value) => (
+              {(["weekly", "monthly", "yearly", "event"] as const).map((value) => (
                 <option key={value} value={value}>
                   {formatDifficulty(value)}
                 </option>
@@ -2011,6 +2019,20 @@ function RecapAnalyticsView() {
           <LoadingInline />
         )}
       </Card>
+      <CalendarExplorerModal
+        open={calendarOpen}
+        title="Recap calendar"
+        subtitle={scope === "event" ? "Event drilldown using the shared calendar modal." : `Range anchored to ${recapNavLabel(scope, anchorDate, server)}`}
+        server={server}
+        mode={calendarMode}
+        anchorDate={anchorDate}
+        onModeChange={setCalendarMode}
+        onAnchorDateChange={setAnchorDate}
+        onClose={() => setCalendarOpen(false)}
+        yearData={recapCalendarYear.data}
+        monthData={recapCalendarMonth.data}
+        shots={recapCalendarShots.data?.items ?? null}
+      />
     </div>
   );
 }
@@ -2263,7 +2285,7 @@ function SongStatsPage() {
               {journey.data ? <JourneySummary data={journey.data} /> : <LoadingInline />}
             </Card>
           </div>
-          <Card title="Progression chain">
+          <Card title="Journey timeline" subtitle="Vertical progression through the song's milestone screenshots and events.">
             {journey.data ? <TimelinePanel items={journey.data.timeline} server={server} /> : <LoadingInline />}
           </Card>
         </div>
@@ -2640,13 +2662,16 @@ function SongRankingsTable({
   onSort,
   total,
   server,
+  loading,
 }: {
   items: SongRankingsResponse["items"];
   sortBy: string;
   onSort: (key: string) => void;
   total: number;
   server: User["server"];
+  loading?: boolean;
 }) {
+  if (loading && !items.length) return <LoadingCard label="Loading ranked songs..." />;
   if (!items.length) return <EmptyState text="No ranked songs found for the current filters." />;
   return (
     <div className="table-wrap">
@@ -2656,22 +2681,26 @@ function SongRankingsTable({
             <th>Song</th>
             <th>
               <button type="button" className="th-sort" onClick={() => onSort("play_count")}>
-                Plays{sortBy === "play_count" ? " *" : ""}
+                <span className="th-sort__label">Plays</span>
+                <span className="th-sort__arrow">{sortBy === "play_count" ? "▼" : ""}</span>
               </button>
             </th>
             <th>
               <button type="button" className="th-sort" onClick={() => onSort("fc_count")}>
-                FC{sortBy === "fc_count" ? " *" : ""}
+                <span className="th-sort__label">FC</span>
+                <span className="th-sort__arrow">{sortBy === "fc_count" ? "▼" : ""}</span>
               </button>
             </th>
             <th>
               <button type="button" className="th-sort" onClick={() => onSort("ap_count")}>
-                AP{sortBy === "ap_count" ? " *" : ""}
+                <span className="th-sort__label">AP</span>
+                <span className="th-sort__arrow">{sortBy === "ap_count" ? "▼" : ""}</span>
               </button>
             </th>
             <th>
               <button type="button" className="th-sort" onClick={() => onSort("skill_score")}>
-                Skill{sortBy === "skill_score" ? " *" : ""}
+                <span className="th-sort__label">Skill</span>
+                <span className="th-sort__arrow">{sortBy === "skill_score" ? "▼" : ""}</span>
               </button>
             </th>
             <th>Latest</th>
@@ -2693,6 +2722,7 @@ function SongRankingsTable({
         </tbody>
       </table>
       <div className="inline-meta">Loaded {items.length} of {total}</div>
+      {loading ? <div className="inline-meta">Refreshing rankings...</div> : null}
     </div>
   );
 }
@@ -2700,8 +2730,8 @@ function SongRankingsTable({
 function RecapPanel({ data, server, scope }: { data: RecapResponse; server: User["server"]; scope: RecapScope }) {
   const digest = data.daily_digest ?? [];
   const maxPlays = Math.max(1, ...digest.map((d) => d.plays));
-  const showSessionTable = scope === "weekly" || scope === "event";
-  const showHeatStrip = scope === "monthly" || scope === "seasonal" || scope === "yearly";
+  const showDailyTable = scope === "weekly" || scope === "event";
+  const showHeatStrip = scope === "monthly" || scope === "yearly";
   const [hlIndex, setHlIndex] = useState<number | null>(null);
   const hlItems: ScreenshotModalItem[] = useMemo(
     () =>
@@ -2732,11 +2762,10 @@ function RecapPanel({ data, server, scope }: { data: RecapResponse; server: User
         <MetricCard label="Total plays" value={data.summary.total_plays ?? 0} />
         <MetricCard label="Skill score" value={data.skill_score} />
         <MetricCard label="Delta" value={data.skill_score_delta} />
-        <MetricCard label="Sessions" value={data.sessions.total_sessions || 0} />
       </div>
-      {showSessionTable && digest.length > 0 && (
+      {showDailyTable && digest.length > 0 && (
         <div className="stack">
-          <div className="subheading">Daily sessions & plays</div>
+          <div className="subheading">Daily plays</div>
           <div className="table-wrap">
             <table className="data-table recap-daily-table">
               <thead>
@@ -2745,7 +2774,6 @@ function RecapPanel({ data, server, scope }: { data: RecapResponse; server: User
                   <th>Plays</th>
                   <th>FC</th>
                   <th>AP</th>
-                  <th>Sessions</th>
                 </tr>
               </thead>
               <tbody>
@@ -2755,7 +2783,6 @@ function RecapPanel({ data, server, scope }: { data: RecapResponse; server: User
                     <td>{row.plays}</td>
                     <td>{row.fc}</td>
                     <td>{row.ap}</td>
-                    <td>{row.sessions}</td>
                   </tr>
                 ))}
               </tbody>
@@ -2837,8 +2864,8 @@ function EventStatsPanel({ data }: { data: EventStatsResponse }) {
       <div className="stats-grid compact">
         <MetricCard label="Event" value={data.event_name || `#${data.event_id}`} />
         <MetricCard label="Skill score" value={data.skill_score} />
-        <MetricCard label="Sessions" value={data.total_sessions} />
-        <MetricCard label="Longest session" value={`${data.longest_session_minutes}m`} />
+        <MetricCard label="FC gains" value={data.fc_gains} />
+        <MetricCard label="AP gains" value={data.ap_gains} />
       </div>
       <div className="layout-two">
         <div>
@@ -3019,27 +3046,40 @@ function TimelinePanel({
   }));
   return (
     <>
-      <div className="journey-chain">
+      <div className="timeline journey-timeline">
         {items.map((item, index) => (
           <button
             type="button"
             key={`${item.type}-${item.timestamp || index}`}
-            className="journey-node"
+            className={active === index ? "timeline-item journey-timeline__item active" : "timeline-item journey-timeline__item"}
             onClick={() => {
               setActive(index);
               if (item.image_url) setModalOpen(true);
             }}
           >
-            <div className="journey-node__rail">
-              <div className="journey-node__dot" />
-              {index < items.length - 1 ? <div className="journey-node__line" /> : null}
+            <div className="timeline-marker" />
+            <div className="timeline-content journey-timeline__content">
+              <div className="journey-timeline__head">
+                <div>
+                  <div className="brand-kicker">{item.type.replace(/_/g, " ")}</div>
+                  <strong>{item.label}</strong>
+                </div>
+                <div className="inline-meta">{item.timestamp ? formatDateTime(item.timestamp, server) : "No timestamp"}</div>
+              </div>
+              {Object.entries(item.details).length > 0 ? (
+                <div className="inline-meta">
+                  {Object.entries(item.details)
+                    .filter(([, value]) => value != null && value !== "")
+                    .map(([key, value]) => {
+                      const label = key.replace(/_/g, " ");
+                      const display = typeof value === "number" && key === "accuracy" ? `${value}%` : String(value);
+                      return `${label}: ${display}`;
+                    })
+                    .join(" · ")}
+                </div>
+              ) : null}
+              {item.image_url ? <SecureImage path={item.image_url} alt={item.filename || item.label} className="journey-timeline__image" /> : null}
             </div>
-            <strong>{item.label}</strong>
-            <div className="inline-meta">{item.timestamp ? formatDateTime(item.timestamp, server) : "No timestamp"}</div>
-            {typeof item.details?.accuracy === "number" ? (
-              <div className="inline-meta">Accuracy {String(item.details.accuracy)}%</div>
-            ) : null}
-            {item.image_url ? <SecureImage path={item.image_url} alt={item.filename || item.label} className="thumb-image" /> : null}
           </button>
         ))}
       </div>

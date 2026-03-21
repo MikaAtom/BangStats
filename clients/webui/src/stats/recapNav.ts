@@ -1,7 +1,7 @@
 import type { User } from "../api";
 import { webLocale } from "../utils/format";
 
-export type RecapScope = "weekly" | "monthly" | "seasonal" | "yearly" | "event";
+export type RecapScope = "weekly" | "monthly" | "yearly" | "event";
 
 /** Monday-start week containing `anchor` (local). */
 export function weekRangeContaining(anchor: Date): { start: Date; end: Date } {
@@ -30,8 +30,7 @@ export function stepRecapAnchor(scope: RecapScope, anchor: Date, direction: -1 |
     next.setFullYear(next.getFullYear() + direction);
     return next;
   }
-  // seasonal: step by calendar quarter (~season)
-  next.setMonth(next.getMonth() + direction * 3);
+  next.setMonth(next.getMonth() + direction);
   return next;
 }
 
@@ -44,32 +43,6 @@ export function recapNavLabel(scope: RecapScope, anchor: Date, server: User["ser
   }
   if (scope === "monthly") {
     return anchor.toLocaleDateString(loc, { month: "long", year: "numeric" });
-  }
-  if (scope === "seasonal") {
-    const m = anchor.getMonth();
-    const year = anchor.getFullYear();
-    let name: string;
-    let startM: number;
-    let endM: number;
-    if (m >= 2 && m <= 4) {
-      name = "Spring";
-      startM = 2;
-      endM = 4;
-    } else if (m >= 5 && m <= 7) {
-      name = "Summer";
-      startM = 5;
-      endM = 7;
-    } else if (m >= 8 && m <= 10) {
-      name = "Fall";
-      startM = 8;
-      endM = 10;
-    } else {
-      name = "Winter";
-      return `${name} ${year} (Dec–Feb)`;
-    }
-    const start = new Date(year, startM, 1);
-    const end = new Date(year, endM, 1);
-    return `${name} ${year} (${start.toLocaleDateString(loc, { month: "short" })}–${end.toLocaleDateString(loc, { month: "short" })})`;
   }
   if (scope === "yearly") {
     return String(anchor.getFullYear());

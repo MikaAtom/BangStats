@@ -314,7 +314,6 @@ class RecapDailyRow(BaseModel):
     fc: int = 0
     ap: int = 0
     accuracy: float = 0.0
-    sessions: int = 0
 
 
 class RecapResponse(BaseModel):
@@ -335,5 +334,4 @@ class RecapResponse(BaseModel):
     highlights: List[RecapHighlight] = Field(default_factory=list)
     daily_digest: List[RecapDailyRow] = Field(default_factory=list)
     streaks: Dict[str, int] = Field(default_factory=dict)
-    sessions: Dict[str, Any] = Field(default_factory=dict)
     exclusion_context: Dict[str, Any] = Field(default_factory=dict)

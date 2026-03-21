@@ -170,6 +170,9 @@
 }
 
 .data-table .th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   background: none;
   border: none;
   padding: 0;
@@ -179,8 +182,19 @@
   text-transform: inherit;
   letter-spacing: inherit;
   cursor: pointer;
+  text-decoration: none;
+}
+
+.data-table .th-sort__label {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.data-table .th-sort__arrow {
+  display: inline-block;
+  width: 1ch;
+  text-align: center;
+  color: var(--purple-300);
 }
 
 .data-table td:nth-child(n + 2) {
