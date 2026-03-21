@@ -106,11 +106,11 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
 
   const n = data.points.length;
   const vbW = 100;
-  const vbH = variant === "overview" ? 86 : 44;
+  const vbH = variant === "overview" ? 82 : 44;
   const padLeft = variant === "overview" ? 9 : 6;
   const padRight = variant === "overview" ? 9 : 6;
-  const padTop = variant === "overview" ? 13 : 7;
-  const padBottom = variant === "overview" ? 20 : 7;
+  const padTop = variant === "overview" ? 11.5 : 7;
+  const padBottom = variant === "overview" ? 18 : 7;
   const innerW = vbW - padLeft - padRight;
 
   const scores = data.points.map((point) => point.skill_score);
@@ -122,9 +122,9 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
   const deltaFontSize = variant === "overview" ? 2.3 : 0;
   const valueLabelHeight = estimateTextHeight(valueFontSize);
   const deltaLabelHeight = estimateTextHeight(deltaFontSize);
-  const topValueBand = variant === "overview" ? valueLabelHeight + dotRadius * 2.4 : 0;
-  const bottomValueBand = variant === "overview" ? valueLabelHeight + dotRadius * 2.6 : 0;
-  const deltaBand = variant === "overview" ? deltaLabelHeight + dotRadius * 1.8 : 0;
+  const topValueBand = variant === "overview" ? valueLabelHeight + dotRadius * 1.55 : 0;
+  const bottomValueBand = variant === "overview" ? valueLabelHeight + dotRadius * 1.8 : 0;
+  const deltaBand = variant === "overview" ? deltaLabelHeight + dotRadius * 0.95 : 0;
   const plotTop = padTop + topValueBand + deltaBand;
   const plotBottom = vbH - padBottom - bottomValueBand;
   const innerH = (variant === "overview" ? plotBottom - plotTop : vbH - padTop - padBottom);
@@ -170,8 +170,7 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
       left: 1.2,
       right: vbW - 1.2,
     };
-    const valueOffset = dotRadius + valueLabelHeight / 2 + valueFontSize * 0.55;
-    const deltaOffset = dotRadius + deltaLabelHeight / 2 + deltaFontSize * 0.85;
+    const valueOffset = dotRadius + valueLabelHeight / 2 + valueFontSize * 0.22;
     const pointLabels: PlacedPointLabel[] = points.map((point) => {
       const text = String(point.skill_score);
       const width = estimateTextWidth(text, valueFontSize);
@@ -197,36 +196,69 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
       const midpoint = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
       const tangent = normalize({ x: end.x - start.x, y: end.y - start.y });
       const normal = normalize({ x: -tangent.y, y: tangent.x });
-      const upperNormal = normal.y <= 0 ? normal : { x: -normal.x, y: -normal.y };
       const halfSpan = Math.abs(end.x - start.x) / 2;
-      const tangentLimit = Math.max(0, halfSpan - width / 2 - dotRadius * 1.4);
-      const pointGap = valueLabelHeight * 0.35;
-      let tangentShift = 0;
-      let rect = rectFromCenter(midpoint.x, midpoint.y + upperNormal.y * deltaOffset, width, height);
+      const tangentLimit = Math.max(0, halfSpan - width / 2 - dotRadius * 1.25);
+      const pointGap = valueLabelHeight * 0.28;
+      const isDescending = end.y > start.y;
+      const upperNormal = normal.y <= 0 ? normal : { x: -normal.x, y: -normal.y };
+      const lowerNormal = { x: -upperNormal.x, y: -upperNormal.y };
+      const primarySide = isDescending ? upperNormal : lowerNormal;
+      const secondarySide = isDescending ? lowerNormal : upperNormal;
+      const baseOffset = dotRadius + height / 2 + deltaFontSize * 0.46;
+      const extraOffset = deltaFontSize * 0.5;
 
-      const overlapsStart = overlaps(expandRect(rect, pointGap, pointGap), pointLabelRects[index]!);
-      const overlapsEnd = overlaps(expandRect(rect, pointGap, pointGap), pointLabelRects[index + 1]!);
-      if (overlapsStart || overlapsEnd) {
-        const awayFromStart = { x: tangent.x, y: tangent.y };
-        const awayFromEnd = { x: -tangent.x, y: -tangent.y };
-        const preferredDirection = overlapsStart && !overlapsEnd ? awayFromStart : overlapsEnd && !overlapsStart ? awayFromEnd : (point.y < next.y ? awayFromEnd : awayFromStart);
-        tangentShift = tangentLimit * Math.sign(preferredDirection.x || 1);
+      const placeDelta = (side: Vector, offset: number) => {
+        const baseX = midpoint.x + side.x * offset;
+        const baseY = midpoint.y + side.y * offset;
+        const baseRect = rectFromCenter(baseX, baseY, width, height);
+        const overlapsStart = overlaps(expandRect(baseRect, pointGap, pointGap), pointLabelRects[index]!);
+        const overlapsEnd = overlaps(expandRect(baseRect, pointGap, pointGap), pointLabelRects[index + 1]!);
+        let tangentShift = 0;
+
+        if (overlapsStart || overlapsEnd) {
+          if (overlapsStart && !overlapsEnd) tangentShift = tangentLimit;
+          else if (overlapsEnd && !overlapsStart) tangentShift = -tangentLimit;
+          else tangentShift = tangent.y < 0 ? -tangentLimit : tangentLimit;
+        } else if (!isDescending) {
+          tangentShift = tangent.y < 0 ? -Math.min(tangentLimit, width * 0.28) : Math.min(tangentLimit, width * 0.28);
+        }
+
+        const x = clamp(
+          baseX + tangent.x * tangentShift,
+          Math.min(start.x, end.x) + width / 2,
+          Math.max(start.x, end.x) - width / 2,
+        );
+        const y = baseY + tangent.y * tangentShift;
+        return {
+          x,
+          y,
+          rect: rectFromCenter(x, y, width, height),
+        };
+      };
+
+      let placed = placeDelta(primarySide, baseOffset);
+      const primaryBlocked =
+        overlaps(expandRect(placed.rect, pointGap, pointGap), pointLabelRects[index]!) ||
+        overlaps(expandRect(placed.rect, pointGap, pointGap), pointLabelRects[index + 1]!);
+
+      if (primaryBlocked) {
+        placed = placeDelta(secondarySide, baseOffset);
       }
 
-      const x = clamp(
-        midpoint.x + upperNormal.x * deltaOffset + tangent.x * tangentShift,
-        Math.min(start.x, end.x) + width / 2,
-        Math.max(start.x, end.x) - width / 2,
-      );
-      const y = midpoint.y + upperNormal.y * deltaOffset + tangent.y * tangentShift;
-      rect = rectFromCenter(x, y, width, height);
+      const secondaryBlocked =
+        overlaps(expandRect(placed.rect, pointGap, pointGap), pointLabelRects[index]!) ||
+        overlaps(expandRect(placed.rect, pointGap, pointGap), pointLabelRects[index + 1]!);
+
+      if (secondaryBlocked) {
+        placed = placeDelta(primarySide, baseOffset + extraOffset);
+      }
 
       return {
         key: `${point.label}-${next.label}`,
-        x,
-        y,
+        x: placed.x,
+        y: placed.y,
         label,
-        rect,
+        rect: placed.rect,
       };
     });
 
