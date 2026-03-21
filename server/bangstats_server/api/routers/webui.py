@@ -34,6 +34,7 @@ from bangstats_server.core.services.upload_storage import UploadStorageService
 from bangstats_server.core.services.user import UserService
 from bangstats_server.core.sync import get_db_counts
 from bangstats_server.core.services.stats import compute_general_summary, filter_excluded_songs, filter_stats_plays
+from bangstats_server.core.utils.chart_meta import chart_level_for_difficulty
 
 router = APIRouter()
 
@@ -76,6 +77,17 @@ def _song_name_map(server: str, song_ids: set[int] | None = None) -> dict[int, s
     return names
 
 
+def _songs_by_internal_id_map(song_ids: set[int] | None) -> dict[int, object]:
+    """Map internal_song_id -> Song row for level/name resolution."""
+    song_service = SongService()
+    songs: list = []
+    if song_ids and hasattr(song_service, "get_songs_by_internal_ids"):
+        songs = song_service.get_songs_by_internal_ids(sorted(song_ids))
+    if not songs:
+        songs = song_service.get_all_songs()
+    return {int(getattr(s, "internal_song_id", 0) or 0): s for s in songs if int(getattr(s, "internal_song_id", 0) or 0) > 0}
+
+
 def _resolve_server_folder_image_path(user: User | None, filename: str | None) -> Path | None:
     if not user or not filename:
         return None
@@ -115,6 +127,7 @@ def _screenshot_item(
     user: User,
     song_names: dict[int, str],
     scan_service: ScanService,
+    songs_by_id: dict[int, object] | None = None,
 ) -> ScreenshotItemResponse:
     image_path = _resolve_screenshot_image_path(user_id, user, getattr(screenshot, "filename", None), scan_service)
     image_url = None
@@ -127,16 +140,35 @@ def _screenshot_item(
     miss = int(getattr(screenshot, "miss", 0) or 0)
     total_notes = perfect + great + good + bad + miss
     accuracy = round((perfect / total_notes) * 100, 2) if total_notes > 0 else 0.0
+    fast_raw = getattr(screenshot, "fast", None)
+    slow_raw = getattr(screenshot, "slow", None)
+    fast = int(fast_raw) if fast_raw is not None else 0
+    slow = int(slow_raw) if slow_raw is not None else 0
+    max_combo = int(getattr(screenshot, "max_combo", 0) or 0)
+    sid = int(screenshot.song_id)
+    level = None
+    if songs_by_id:
+        song_row = songs_by_id.get(sid)
+        level = chart_level_for_difficulty(getattr(song_row, "levels", None) if song_row else None, str(screenshot.difficulty))
 
     return ScreenshotItemResponse(
         id=int(screenshot.id or 0),
         filename=screenshot.filename,
-        song_id=int(screenshot.song_id),
-        song_name=song_names.get(int(screenshot.song_id)),
+        song_id=sid,
+        song_name=song_names.get(sid),
         difficulty=screenshot.difficulty,
         live_type=screenshot.live_type,
         score=int(screenshot.score),
         accuracy=accuracy,
+        perfect=perfect,
+        great=great,
+        good=good,
+        bad=bad,
+        miss=miss,
+        fast=fast,
+        slow=slow,
+        max_combo=max_combo,
+        level=level,
         full_combo=bool(screenshot.full_combo),
         all_perfect=bool(screenshot.all_perfect),
         anomaly=bool(screenshot.anomaly),
@@ -268,6 +300,7 @@ def get_dashboard(
         if int(getattr(screenshot, "song_id", 0) or 0) > 0
     }
     song_names = _song_name_map(user.server, recent_song_ids)
+    songs_by_id = _songs_by_internal_id_map(recent_song_ids)
 
     counts = get_db_counts()
     current_event = EventService().get_current_event(language=user.server)
@@ -314,6 +347,7 @@ def get_dashboard(
                 user=user,
                 song_names=song_names,
                 scan_service=scan_service,
+                songs_by_id=songs_by_id,
             )
             for screenshot in recent_screenshots
         ],
@@ -355,6 +389,7 @@ def list_screenshots(
         if int(getattr(screenshot, "song_id", 0) or 0) > 0
     }
     song_names = _song_name_map(current_user.server, song_ids)
+    songs_by_id = _songs_by_internal_id_map(song_ids)
 
     screenshots = _apply_screenshot_filters(
         screenshots,
@@ -385,6 +420,7 @@ def list_screenshots(
                 user=current_user,
                 song_names=song_names,
                 scan_service=scan_service,
+                songs_by_id=songs_by_id,
             )
             for screenshot in page
         ],

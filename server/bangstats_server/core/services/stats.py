@@ -182,16 +182,40 @@ def compute_recent_plays(screenshots: List[Any], n: int = 5) -> List[Dict[str, A
         key=lambda s: getattr(s, "timestamp", datetime.min),
         reverse=True,
     )[:n]
-    return [
-        {
-            "song_id": int(getattr(s, "song_id", 0)),
-            "difficulty": str(getattr(s, "difficulty", "")),
-            "timestamp": getattr(s, "timestamp", None),
-            "filename": getattr(s, "filename", None),
-            "live_type": str(getattr(s, "live_type", "")),
-        }
-        for s in ordered
-    ]
+    rows: List[Dict[str, Any]] = []
+    for s in ordered:
+        perfect = int(getattr(s, "perfect", 0) or 0)
+        great = int(getattr(s, "great", 0) or 0)
+        good = int(getattr(s, "good", 0) or 0)
+        bad = int(getattr(s, "bad", 0) or 0)
+        miss = int(getattr(s, "miss", 0) or 0)
+        total_notes = perfect + great + good + bad + miss
+        accuracy = round((perfect / total_notes) * 100, 2) if total_notes > 0 else 0.0
+        fast_raw = getattr(s, "fast", None)
+        slow_raw = getattr(s, "slow", None)
+        rows.append(
+            {
+                "song_id": int(getattr(s, "song_id", 0)),
+                "difficulty": str(getattr(s, "difficulty", "")),
+                "timestamp": getattr(s, "timestamp", None),
+                "filename": getattr(s, "filename", None),
+                "live_type": str(getattr(s, "live_type", "")),
+                "score": int(getattr(s, "score", 0) or 0),
+                "accuracy": accuracy,
+                "perfect": perfect,
+                "great": great,
+                "good": good,
+                "bad": bad,
+                "miss": miss,
+                "fast": int(fast_raw) if fast_raw is not None else 0,
+                "slow": int(slow_raw) if slow_raw is not None else 0,
+                "max_combo": int(getattr(s, "max_combo", 0) or 0),
+                "full_combo": bool(getattr(s, "full_combo", False)),
+                "all_perfect": bool(getattr(s, "all_perfect", False)),
+                "anomaly": bool(getattr(s, "anomaly", False)),
+            }
+        )
+    return rows
 
 
 def compute_skill_score(screenshots: List[Any]) -> float:

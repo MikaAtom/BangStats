@@ -32,6 +32,7 @@ from bangstats_server.core.services.event_time import parse_event_timestamp_ms
 from bangstats_server.core.services.scan import ScanService
 from bangstats_server.core.services.upload_storage import UploadStorageService
 from bangstats_server.core.services.song import SongService
+from bangstats_server.core.utils.chart_meta import chart_level_for_difficulty
 from bangstats_server.core.services.user import UserService
 from bangstats_server.core.db.models.user import User
 from bangstats_server.core.services.stats import (
@@ -343,6 +344,9 @@ def get_user_stats(
         recent = compute_recent_plays(screenshots, n=5)
         referenced_song_ids = [int(item.get("song_id", 0)) for item in [*top_songs, *recent]]
         song_names = _song_names_for_ids(song_service, current_user.server, referenced_song_ids)
+        ref_ids = sorted({int(x) for x in referenced_song_ids if int(x) > 0})
+        song_rows = _songs_by_internal_ids(song_service, ref_ids)
+        songs_by_id = {int(s.internal_song_id): s for s in song_rows if s is not None}
         for item in top_songs:
             song_id = int(item.get("song_id", 0))
             item["song_name"] = song_names.get(song_id, f"Song {song_id}")
@@ -350,6 +354,8 @@ def get_user_stats(
             song_id = int(item.get("song_id", 0))
             item["song_name"] = song_names.get(song_id, f"Song {song_id}")
             item["image_url"] = image_resolver.resolve(item.get("filename"))
+            row = songs_by_id.get(song_id)
+            item["level"] = chart_level_for_difficulty(getattr(row, "levels", None) if row else None, str(item.get("difficulty", "")))
 
         return StatsResponse(
             summary=summary,

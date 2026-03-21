@@ -23,44 +23,55 @@ export function ResultStatGrid({
 }: {
   item: ResultStatSource;
   server: User["server"];
-  /** When false, omit live type / timestamp / score (compact cards). */
+  /** When false, omit live type / timestamp / prominent score (compact cards). */
   showMetaFooter?: boolean;
 }) {
   const n = (v: number | undefined) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const loc = webLocale(server);
   return (
     <div className="stack">
-      <div className="result-screen">
-        <div className="result-screen__cell">
-          <span className="result-screen__label">Perfect</span>
-          <span className="result-screen__value">{n(item.perfect)}</span>
+      {showMetaFooter && item.score != null && item.score > 0 ? (
+        <div className="result-screen__scoreline">
+          <span className="result-screen__label">Score</span>
+          <span className="result-screen__value result-screen__value--score">{item.score.toLocaleString(loc)}</span>
         </div>
-        <div className="result-screen__cell">
-          <span className="result-screen__label">Fast</span>
-          <span className="result-screen__value">{n(item.fast)}</span>
+      ) : null}
+      <div className="result-screen result-screen--split">
+        <div className="result-screen__col result-screen__col--judgments">
+          <div className="result-screen__cell">
+            <span className="result-screen__label">Perfect</span>
+            <span className="result-screen__value">{n(item.perfect)}</span>
+          </div>
+          <div className="result-screen__cell">
+            <span className="result-screen__label">Great</span>
+            <span className="result-screen__value">{n(item.great)}</span>
+          </div>
+          <div className="result-screen__cell">
+            <span className="result-screen__label">Good</span>
+            <span className="result-screen__value">{n(item.good)}</span>
+          </div>
+          <div className="result-screen__cell">
+            <span className="result-screen__label">Bad</span>
+            <span className="result-screen__value">{n(item.bad)}</span>
+          </div>
+          <div className="result-screen__cell">
+            <span className="result-screen__label">Miss</span>
+            <span className="result-screen__value">{n(item.miss)}</span>
+          </div>
         </div>
-        <div className="result-screen__cell">
-          <span className="result-screen__label">Great</span>
-          <span className="result-screen__value">{n(item.great)}</span>
-        </div>
-        <div className="result-screen__cell">
-          <span className="result-screen__label">Slow</span>
-          <span className="result-screen__value">{n(item.slow)}</span>
-        </div>
-        <div className="result-screen__cell">
-          <span className="result-screen__label">Good</span>
-          <span className="result-screen__value">{n(item.good)}</span>
-        </div>
-        <div className="result-screen__cell">
-          <span className="result-screen__label">Max combo</span>
-          <span className="result-screen__value">{n(item.max_combo)}</span>
-        </div>
-        <div className="result-screen__cell">
-          <span className="result-screen__label">Bad</span>
-          <span className="result-screen__value">{n(item.bad)}</span>
-        </div>
-        <div className="result-screen__cell">
-          <span className="result-screen__label">Miss</span>
-          <span className="result-screen__value">{n(item.miss)}</span>
+        <div className="result-screen__col result-screen__col--timing">
+          <div className="result-screen__cell">
+            <span className="result-screen__label">Fast</span>
+            <span className="result-screen__value">{n(item.fast)}</span>
+          </div>
+          <div className="result-screen__cell">
+            <span className="result-screen__label">Slow</span>
+            <span className="result-screen__value">{n(item.slow)}</span>
+          </div>
+          <div className="result-screen__cell">
+            <span className="result-screen__label">Max combo</span>
+            <span className="result-screen__value">{n(item.max_combo)}</span>
+          </div>
         </div>
       </div>
       {typeof item.accuracy === "number" && (
@@ -70,7 +81,6 @@ export function ResultStatGrid({
         <div className="inline-meta">
           {item.live_type ? `${formatLiveType(item.live_type)} · ` : ""}
           {item.timestamp ? formatDateTime(item.timestamp, server) : ""}
-          {item.score != null && item.score > 0 ? ` · Score ${item.score.toLocaleString(webLocale(server))}` : ""}
         </div>
       )}
     </div>

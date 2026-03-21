@@ -9,6 +9,7 @@ export type ScreenshotModalItem = ResultStatSource & {
   song_name?: string | null;
   song_id?: number;
   difficulty?: string;
+  level?: number | null;
   filename?: string | null;
   image_url?: string | null;
   image_available?: boolean;
@@ -50,6 +51,7 @@ export function ScreenshotModal({ items, index, server, onClose, onIndexChange }
             <h3>{title}</h3>
             <div className="inline-meta">
               {diffLabel}
+              {typeof item.level === "number" && item.level > 0 ? ` · Lv.${item.level}` : ""}
               {item.full_combo ? " · FC" : ""}
               {item.all_perfect ? " · AP" : ""}
               {item.anomaly ? " · Anomaly" : ""}

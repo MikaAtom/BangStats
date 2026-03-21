@@ -33,6 +33,12 @@ def _play(
     full_combo: bool = True,
     all_perfect: bool = False,
     filename: str | None = None,
+    live_type: str = "multi_live",
+    score: int = 0,
+    fast: int | None = None,
+    slow: int | None = None,
+    max_combo: int = 100,
+    anomaly: bool = False,
 ):
     return SimpleNamespace(
         song_id=song_id,
@@ -46,6 +52,12 @@ def _play(
         full_combo=full_combo,
         all_perfect=all_perfect,
         filename=filename,
+        live_type=live_type,
+        score=score,
+        fast=fast,
+        slow=slow,
+        max_combo=max_combo,
+        anomaly=anomaly,
     )
 
 
@@ -84,12 +96,32 @@ def test_recent_plays():
     shots = [
         _play(song_id=1, difficulty="expert", timestamp=base, filename="a.png"),
         _play(song_id=2, difficulty="hard", timestamp=base + timedelta(minutes=1), filename="b.png"),
-        _play(song_id=3, difficulty="normal", timestamp=base + timedelta(minutes=2), filename="c.png"),
+        _play(
+            song_id=3,
+            difficulty="normal",
+            timestamp=base + timedelta(minutes=2),
+            filename="c.png",
+            perfect=90,
+            great=10,
+            miss=0,
+            score=2880513,
+            fast=7,
+            slow=23,
+            max_combo=476,
+        ),
     ]
     recent = compute_recent_plays(shots, n=2)
     assert len(recent) == 2
     assert recent[0]["song_id"] == 3
     assert recent[1]["song_id"] == 2
+    assert recent[0]["perfect"] == 90
+    assert recent[0]["great"] == 10
+    assert recent[0]["miss"] == 0
+    assert recent[0]["score"] == 2880513
+    assert recent[0]["fast"] == 7
+    assert recent[0]["slow"] == 23
+    assert recent[0]["max_combo"] == 476
+    assert recent[0]["accuracy"] == 90.0  # 90 perfect / 100 notes
 
 
 def test_difficulty_detail_fc_ap():

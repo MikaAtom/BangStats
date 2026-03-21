@@ -83,6 +83,69 @@
   overflow: hidden;
 }
 
+.trend-chart-synced.stack {
+  gap: var(--space-2);
+}
+
+.trend-chart-synced__plot {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.trend-chart--synced {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  max-height: 160px;
+  display: block;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.trend-chart--synced .trend-line {
+  stroke-width: 0.85;
+}
+
+.trend-chart--synced .trend-dot {
+  stroke-width: 0.4;
+}
+
+.trend-chart-synced__columns {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.trend-chart-synced__col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.trend-axis-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  line-height: 1.2;
+}
+
+.trend-summary-card--under {
+  width: 100%;
+  min-height: 0;
+}
+
+.trend-summary-card--under strong {
+  font-size: var(--text-lg);
+}
+
 .trend-chart {
   width: 100%;
   min-width: 0;
@@ -107,7 +170,7 @@
 
 .trend-value-label {
   fill: var(--text-primary);
-  font-size: 13px;
+  font-size: 3.2px;
   font-weight: 600;
 }
 

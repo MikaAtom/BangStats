@@ -28,6 +28,7 @@ import {
   type MilestonesResponse,
   type MetaSongConfigResponse,
   type ProgressionResponse,
+  type RecentPlayOverview,
   type RecapResponse,
   type ReferenceSongItem,
   type SongRankingsResponse,
@@ -1448,6 +1449,18 @@ function OverviewAnalyticsView() {
   if (!auth.user) return null;
   const server = auth.user.server;
 
+  const milestoneTeaserItems = useMemo(() => {
+    const list = milestones.data?.milestones;
+    if (!list?.length) return [];
+    return [...list]
+      .sort((a, b) => {
+        const ta = a.meta?.timestamp ? new Date(a.meta.timestamp).getTime() : 0;
+        const tb = b.meta?.timestamp ? new Date(b.meta.timestamp).getTime() : 0;
+        return tb - ta;
+      })
+      .slice(0, 2);
+  }, [milestones.data?.milestones]);
+
   return (
     <div className="page-grid">
       <Card title="Headline stats">
@@ -1465,34 +1478,18 @@ function OverviewAnalyticsView() {
       </Card>
       <div className="layout-two">
         <Card title="Current progress snapshot">
-          {progression.data ? <TrendChart data={progression.data} summaryMode="list" /> : <LoadingInline />}
+          {progression.data ? <TrendChart data={progression.data} /> : <LoadingInline />}
         </Card>
         <Card title="Recent meaningful plays">
           {overview.data ? <RecentPlayList items={overview.data.recent} server={server} /> : <LoadingInline />}
         </Card>
       </div>
-      <div className="layout-two">
-        <Card title="Latest milestones">
-          {milestones.data ? <MilestoneTimeline items={milestones.data.milestones.slice(0, 2)} server={server} /> : <LoadingInline />}
-          <div className="inline-meta" style={{ marginTop: "0.75rem" }}>
-            <Link to="/stats?view=milestones">View all milestones</Link>
-          </div>
-        </Card>
-        <Card title="Explore analytics">
-          <ul className="list">
-            {[
-              ["/stats?view=progress", "Progress — trends, activity, calendar explorer."],
-              ["/stats?view=songs", "Songs — rankings and drilldown."],
-              ["/stats?view=recap&scope=event", "Recap — weekly/monthly/yearly/event scopes."],
-              ["/stats?view=screenshots", "Screenshots — browse result images."],
-            ].map(([to, label]) => (
-              <li key={to}>
-                <Link to={to}>{label}</Link>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      </div>
+      <Card title="Latest milestones">
+        <div className="inline-meta" style={{ marginBottom: "0.65rem" }}>
+          Most recent achievements by date. <Link to="/stats?view=milestones">View all milestones</Link>
+        </div>
+        {milestones.data ? <MilestoneTimeline items={milestoneTeaserItems} server={server} /> : <LoadingInline />}
+      </Card>
     </div>
   );
 }
@@ -1559,7 +1556,12 @@ function ProgressAnalyticsView() {
 
   return (
     <div className="page-grid">
-      <Card title="Analytics toolbar">
+      <Card title="Skill trend">
+        <p className="inline-meta" style={{ margin: "0 0 0.85rem" }}>
+          <strong>Trend scope</strong> and <strong>data points</strong> only affect the skill progression chart below.{" "}
+          <strong>Difficulty</strong>, <strong>live type</strong>, and <strong>meta songs</strong> filter which plays are counted here, in{" "}
+          <strong>Activity</strong>, and in the <strong>calendar</strong>.
+        </p>
         <div className="analytics-section-controls">
           <div className="analytics-filter-row">
             <label className="field inline-field">
@@ -1585,14 +1587,22 @@ function ProgressAnalyticsView() {
             </label>
             <SectionFilterControls filters={filters} onChange={setFilters} />
           </div>
-          <DateRangePicker value={range} onChange={setRange} />
-          <div className="inline-meta">Date range filters the Activity summary. Calendar uses the explorer mode below.</div>
         </div>
-      </Card>
-      <Card title="Skill progression">
         {progression.data ? <TrendChart data={progression.data} /> : <LoadingInline />}
       </Card>
-      <Card title={activity.data ? `Activity summary (${formatDateRange(activity.data.from_date, activity.data.to_date, server)})` : "Activity summary"}>
+      <Card
+        title={
+          activity.data
+            ? `Activity (${formatDateRange(activity.data.from_date, activity.data.to_date, server)})`
+            : "Activity"
+        }
+      >
+        <p className="inline-meta" style={{ margin: "0 0 0.85rem" }}>
+          Only the <strong>date range</strong> below changes this graph. Play filters stay in <strong>Skill trend</strong>.
+        </p>
+        <div className="analytics-section-controls" style={{ marginBottom: "0.85rem" }}>
+          <DateRangePicker value={range} onChange={setRange} />
+        </div>
         {activity.data ? <ActivityBars data={activity.data} /> : !customRangeReady ? <EmptyState text="Pick both custom dates to load activity." /> : <LoadingInline />}
       </Card>
       <Card
@@ -1638,6 +1648,10 @@ function ProgressAnalyticsView() {
           </div>
         }
       >
+        <p className="inline-meta" style={{ margin: "0 0 0.85rem" }}>
+          Switch <strong>mode</strong> and navigate months or years. Click a day for screenshots. Uses the same play filters as <strong>Skill trend</strong>.{" "}
+          <Link to="/stats?view=milestones">Full milestone timeline</Link>
+        </p>
         {calMode === "month" && (calendar.data ? <CalendarHeatmap data={calendar.data} onDayClick={(iso) => {
           setExploreDay(iso);
           setCalMode("day");
@@ -1691,11 +1705,6 @@ function ProgressAnalyticsView() {
             {dayShots.data ? <ScreenshotGallery items={dayShots.data.items} server={server} /> : <LoadingInline />}
           </div>
         )}
-      </Card>
-      <Card title="Milestones">
-        <div className="inline-meta">
-          Milestones moved to their own tab for focused browsing. <Link to="/stats?view=milestones">Open milestones tab</Link>.
-        </div>
       </Card>
     </div>
   );
@@ -2568,7 +2577,7 @@ function RecentPlayList({
   items,
   server,
 }: {
-  items: Array<{ song_id: number; song_name?: string | null; difficulty: string; timestamp?: string | null; filename?: string | null; live_type?: string | null; image_url?: string | null }>;
+  items: RecentPlayOverview[];
   server: User["server"];
 }) {
   const [active, setActive] = useState<number | null>(null);
@@ -2577,16 +2586,25 @@ function RecentPlayList({
     song_id: item.song_id,
     song_name: item.song_name,
     difficulty: item.difficulty,
-    live_type: item.live_type || "",
+    live_type: item.live_type ?? "",
     timestamp: item.timestamp ?? null,
     filename: item.filename ?? null,
     image_url: item.image_url ?? null,
     image_available: Boolean(item.image_url),
-    accuracy: 0,
-    score: 0,
-    full_combo: false,
-    all_perfect: false,
-    anomaly: false,
+    score: item.score ?? 0,
+    accuracy: item.accuracy ?? 0,
+    perfect: item.perfect,
+    great: item.great,
+    good: item.good,
+    bad: item.bad,
+    miss: item.miss,
+    fast: item.fast,
+    slow: item.slow,
+    max_combo: item.max_combo,
+    level: item.level ?? undefined,
+    full_combo: Boolean(item.full_combo),
+    all_perfect: Boolean(item.all_perfect),
+    anomaly: Boolean(item.anomaly),
   }));
   return (
     <>

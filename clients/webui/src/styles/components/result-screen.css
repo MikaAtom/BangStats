@@ -1,8 +1,28 @@
-.result-screen {
+.result-screen--split {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.35rem 1rem;
+  gap: 0.5rem 1.25rem;
   font-size: 0.9rem;
+  align-items: start;
+}
+
+.result-screen__col {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.result-screen__scoreline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.75rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.result-screen__value--score {
+  font-size: 1.15rem;
+  letter-spacing: 0.02em;
 }
 
 .result-screen__cell {
@@ -23,7 +43,7 @@
 }
 
 @media (max-width: 720px) {
-  .result-screen {
+  .result-screen--split {
     grid-template-columns: 1fr 1fr;
   }
 }
@@ -205,9 +225,35 @@
   min-width: 0;
 }
 
+/* Timeline rail + dot (avoid checkbox-like squares) */
+.milestone-timeline.timeline {
+  position: relative;
+  padding-left: 0.15rem;
+}
+
+.milestone-timeline .timeline-item {
+  position: relative;
+  padding-left: 0.25rem;
+}
+
+.milestone-timeline .timeline-item:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 1.1rem;
+  bottom: -0.65rem;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 1px;
+}
+
 .milestone-timeline .timeline-marker {
-  border-radius: 4px;
-  background: linear-gradient(145deg, rgba(124, 92, 255, 0.9), rgba(80, 200, 255, 0.65));
+  width: 10px;
+  height: 10px;
+  margin-top: 0.45rem;
+  border-radius: 50%;
+  background: var(--accent, #7c5cff);
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.2);
 }
 
 .highlight-card.interactive {

@@ -152,10 +152,34 @@ export type ErrorCategoryActionResponse = {
   errors: Record<string, number>;
 };
 
+export type RecentPlayOverview = {
+  song_id: number;
+  song_name?: string | null;
+  difficulty: string;
+  timestamp?: string | null;
+  filename?: string | null;
+  live_type?: string | null;
+  image_url?: string | null;
+  score?: number;
+  accuracy?: number;
+  perfect?: number;
+  great?: number;
+  good?: number;
+  bad?: number;
+  miss?: number;
+  fast?: number;
+  slow?: number;
+  max_combo?: number;
+  level?: number | null;
+  full_combo?: boolean;
+  all_perfect?: boolean;
+  anomaly?: boolean;
+};
+
 export type StatsOverview = {
   summary: Record<string, number>;
   top_songs: Array<{ song_id: number; song_name?: string | null; play_count: number }>;
-  recent: Array<{ song_id: number; song_name?: string | null; difficulty: string; timestamp?: string | null; filename?: string | null; live_type?: string | null; image_url?: string | null }>;
+  recent: RecentPlayOverview[];
   exclusion_context: {
     server_meta_song_ids: number[];
     user_excluded_song_ids: number[];
@@ -538,6 +562,7 @@ export type ScreenshotItem = {
   fast?: number;
   slow?: number;
   max_combo?: number;
+  level?: number | null;
 };
 
 export type ScreenshotListResponse = {
