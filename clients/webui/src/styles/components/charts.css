@@ -270,6 +270,12 @@
   stroke-width: 0.35;
 }
 
+.trend-skill-label {
+  fill: var(--text-primary);
+  font-size: 3.2px;
+  font-weight: 700;
+}
+
 .trend-value-label {
   fill: var(--text-primary);
   font-size: 3.2px;

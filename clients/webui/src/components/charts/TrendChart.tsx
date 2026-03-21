@@ -49,6 +49,7 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
       axisLabel: formatAxisLabel(point.from_date, server),
       accuracyLabel: formatAccuracy(point.accuracy),
       textAnchor: (index === 0 ? "start" : index === n - 1 ? "end" : "middle") as "start" | "end" | "middle",
+      skillLabelY: y > padTop + innerH * 0.72 ? Math.min(y + 5.5, vbH - padBottom - 1.2) : Math.max(y - 4.2, padTop + 1.4),
     };
   });
 
@@ -88,6 +89,9 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
                   className="trend-guide-line"
                   vectorEffect="non-scaling-stroke"
                 />
+                <text x={point.x} y={point.skillLabelY} textAnchor={point.textAnchor} className="trend-skill-label">
+                  {point.skill_score}
+                </text>
                 <circle cx={point.x} cy={point.y} r="1.8" className="trend-dot" vectorEffect="non-scaling-stroke" />
                 <text x={point.x} y={vbH - 6.2} textAnchor={point.textAnchor} className="trend-axis-tick">
                   {point.axisLabel}
