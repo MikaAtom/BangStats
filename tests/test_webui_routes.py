@@ -99,6 +99,60 @@ def test_get_screenshot_image_serves_file(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert response.content == b"\x89PNG\r\n"
 
 
+def test_get_screenshot_image_thumb_variant_returns_jpeg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from PIL import Image
+
+    image_path = tmp_path / "large.png"
+    Image.new("RGB", (400, 300), color=(10, 120, 200)).save(image_path, format="PNG")
+
+    monkeypatch.setattr(
+        webui_router.ScreenshotService,
+        "get_screenshot_by_id",
+        lambda self, screenshot_id: SimpleNamespace(
+            id=screenshot_id,
+            user_id=7,
+            filename="large.png",
+        ),
+    )
+    monkeypatch.setattr(
+        webui_router.UploadStorageService,
+        "resolve_user_file",
+        lambda self, user_id, filename: image_path,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/users/7/screenshots/11/image", params={"variant": "thumb"})
+
+    assert response.status_code == 200
+    assert response.content.startswith(b"\xff\xd8")
+    assert len(response.content) < image_path.stat().st_size
+
+
+def test_get_screenshot_image_invalid_variant(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    image_path = tmp_path / "x.png"
+    image_path.write_bytes(b"\x89PNG\r\n")
+
+    monkeypatch.setattr(
+        webui_router.ScreenshotService,
+        "get_screenshot_by_id",
+        lambda self, screenshot_id: SimpleNamespace(
+            id=screenshot_id,
+            user_id=7,
+            filename="x.png",
+        ),
+    )
+    monkeypatch.setattr(
+        webui_router.UploadStorageService,
+        "resolve_user_file",
+        lambda self, user_id, filename: image_path,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/users/7/screenshots/11/image", params={"variant": "huge"})
+
+    assert response.status_code == 400
+
+
 def test_meta_song_config_and_export_import_routes(monkeypatch: pytest.MonkeyPatch):
     fake_user = SimpleNamespace(
         id=7,

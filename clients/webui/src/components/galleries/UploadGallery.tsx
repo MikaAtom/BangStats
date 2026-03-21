@@ -12,7 +12,7 @@ export function UploadGallery({ items }: UploadGalleryProps) {
     <div className="gallery">
       {items.slice(0, 18).map((item) => (
         <div className="gallery-card" key={item.filename}>
-          <SecureImage path={item.image_url} alt={item.filename} className="gallery-image" />
+          <SecureImage path={item.image_url} alt={item.filename} className="gallery-image" variant="thumb" />
           <div className="gallery-meta">
             <strong>{item.filename}</strong>
             <span>{Math.round(item.size_bytes / 1024)} KB</span>

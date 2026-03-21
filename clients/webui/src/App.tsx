@@ -1865,9 +1865,20 @@ function RecapAnalyticsView() {
     [auth.user?.id, scope, selectedEventId, filters.difficulty, filters.liveType, filters.includeMeta],
   );
 
+  const recapCalendarEventRange =
+    scope === "event" && recapEvent.data
+      ? { from_date: recapEvent.data.from_date, to_date: recapEvent.data.to_date }
+      : null;
+
   const recapExplorerRange = scope === "event" && recapEvent.data
     ? { from_date: recapEvent.data.from_date, to_date: recapEvent.data.to_date }
-    : calendarRangeForMode(calendarMode, anchorDate);
+    : calendarRangeForMode(calendarMode, anchorDate, recapCalendarEventRange);
+
+  useEffect(() => {
+    if (calendarMode === "event" && !recapCalendarEventRange) {
+      setCalendarMode("month");
+    }
+  }, [calendarMode, recapCalendarEventRange]);
 
   const recapCalendarMonth = useLoadable<CalendarResponse>(
     auth.user && calendarOpen && (calendarMode === "month" || calendarMode === "week" || calendarMode === "day")
@@ -2059,6 +2070,8 @@ function RecapAnalyticsView() {
         yearState={recapCalendarYear}
         monthState={recapCalendarMonth}
         shotsState={recapCalendarShots}
+        showEventMode={scope === "event" && Boolean(recapEvent.data)}
+        eventRange={recapCalendarEventRange}
       />
     </div>
   );
@@ -2737,7 +2750,7 @@ function RecentPlayList({
               onOpen={() => setActive(index)}
               thumb={
                 item.image_url ? (
-                  <SecureImage path={item.image_url} alt={item.filename || `play-${index}`} className="compact-shot-thumb" />
+                  <SecureImage path={item.image_url} alt={item.filename || `play-${index}`} className="compact-shot-thumb" variant="thumb" />
                 ) : (
                   <div className="gallery-placeholder compact-shot-thumb">No image</div>
                 )
@@ -2937,7 +2950,7 @@ function RecapPanel({
             <strong>{item.value}</strong>
             <p>{item.detail}</p>
             {item.screenshot?.image_url && (
-              <SecureImage path={item.screenshot.image_url} alt={item.screenshot.filename || item.title} className="highlight-image" />
+              <SecureImage path={item.screenshot.image_url} alt={item.screenshot.filename || item.title} className="highlight-image" variant="thumb" />
             )}
           </button>
         ))}
@@ -3016,7 +3029,9 @@ function EventFocusPanel({
                 <span className="brand-kicker">{item.title}</span>
                 <strong>{item.value}</strong>
                 <p>{item.detail}</p>
-                {item.screenshot?.image_url && <SecureImage path={item.screenshot.image_url} alt={item.screenshot.filename || item.title} className="highlight-image" />}
+                {item.screenshot?.image_url && (
+                  <SecureImage path={item.screenshot.image_url} alt={item.screenshot.filename || item.title} className="highlight-image" variant="thumb" />
+                )}
               </div>
             ))}
           </div>
@@ -3079,7 +3094,7 @@ function MilestoneTimeline({
           <div className="timeline-marker" />
           <div className="timeline-content milestone-row">
             {item.meta?.image_url ? (
-              <SecureImage path={item.meta.image_url} alt={item.label} className="thumb-image" />
+              <SecureImage path={item.meta.image_url} alt={item.label} className="thumb-image" variant="thumb" />
             ) : (
               <div className="gallery-placeholder thumb-image">No image</div>
             )}
@@ -3107,7 +3122,11 @@ function MilestoneGallery({
     <div className="gallery milestone-gallery">
       {items.map((item) => (
         <div className="gallery-card" key={item.label}>
-          {item.meta.image_url ? <SecureImage path={item.meta.image_url} alt={item.meta.filename || item.label} className="gallery-image" /> : <div className="gallery-placeholder">No image</div>}
+          {item.meta.image_url ? (
+            <SecureImage path={item.meta.image_url} alt={item.meta.filename || item.label} className="gallery-image" variant="thumb" />
+          ) : (
+            <div className="gallery-placeholder">No image</div>
+          )}
           <div className="gallery-meta">
             <strong>{item.label}</strong>
             <span>{item.meta.timestamp ? formatDateTime(item.meta.timestamp, server) : "Unknown date"}</span>
@@ -3190,7 +3209,7 @@ function TimelinePanel({
                     .join(" · ")}
                 </div>
               ) : null}
-              {item.image_url ? <SecureImage path={item.image_url} alt={item.filename || item.label} className="journey-timeline__image" /> : null}
+              {item.image_url ? <SecureImage path={item.image_url} alt={item.filename || item.label} className="journey-timeline__image" variant="thumb" /> : null}
             </div>
           </button>
         ))}

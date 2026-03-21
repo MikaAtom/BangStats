@@ -30,6 +30,7 @@ from bangstats_server.core.services.scan_job import ScanJobService
 from bangstats_server.core.services.screenshot import ScreenshotService
 from bangstats_server.core.services.song import SongService
 from bangstats_server.core.services.sync_job import SyncJobService
+from bangstats_server.core.services.image_thumbnail import try_thumbnail_path
 from bangstats_server.core.services.upload_storage import UploadStorageService
 from bangstats_server.core.services.user import UserService
 from bangstats_server.core.sync import get_db_counts
@@ -39,6 +40,24 @@ from bangstats_server.core.utils.chart_meta import chart_level_for_difficulty
 router = APIRouter()
 
 _SCAN_ERRORS_CACHE_TTL_SECONDS = 10.0
+
+
+def _normalize_image_variant(variant: str | None) -> str | None:
+    if variant is None or not str(variant).strip():
+        return None
+    lowered = str(variant).strip().lower()
+    if lowered == "thumb":
+        return "thumb"
+    raise HTTPException(status_code=400, detail="Invalid image variant; use 'thumb' or omit.")
+
+
+def _image_file_response(path: Path, *, variant: str | None) -> FileResponse:
+    v = _normalize_image_variant(variant)
+    if v == "thumb":
+        thumb = try_thumbnail_path(path)
+        if thumb is not None:
+            return FileResponse(thumb, media_type="image/jpeg")
+    return FileResponse(path)
 _scan_errors_cache: dict[str, object] = {
     "expires_at": 0.0,
     "value": {"total": 0, "errors": {}, "error_files": {}},
@@ -431,6 +450,7 @@ def list_screenshots(
 def get_screenshot_image(
     user_id: int,
     screenshot_id: int,
+    variant: str | None = Query(None),
     current_user: User = Depends(get_current_user),
 ):
     user_id = assert_user_scope(user_id, current_user)
@@ -441,7 +461,7 @@ def get_screenshot_image(
     path = _resolve_screenshot_image_path(user_id, current_user, screenshot.filename, ScanService())
     if path is None:
         raise HTTPException(status_code=404, detail="Screenshot image not found")
-    return FileResponse(path)
+    return _image_file_response(path, variant=variant)
 
 
 @router.get("/users/{user_id}/uploads", response_model=UploadFileListResponse)
@@ -470,13 +490,14 @@ def list_uploaded_files(
 def get_uploaded_file(
     user_id: int,
     filename: str,
+    variant: str | None = Query(None),
     current_user: User = Depends(get_current_user),
 ):
     user_id = assert_user_scope(user_id, current_user)
     path = UploadStorageService().resolve_user_file(user_id, filename)
     if path is None:
         raise HTTPException(status_code=404, detail="Uploaded file not found")
-    return FileResponse(path)
+    return _image_file_response(path, variant=variant)
 
 
 @router.get("/users/{user_id}/meta-song-config", response_model=MetaSongConfigResponse)
@@ -619,9 +640,10 @@ def import_user_data(
 def get_scan_error_image(
     error_type: str,
     json_filename: str,
+    variant: str | None = Query(None),
     _: User = Depends(get_current_user),
 ):
     path = ScanService()._find_error_image_path(error_type, json_filename)
     if path is None:
         raise HTTPException(status_code=404, detail="Error image not found")
-    return FileResponse(path)
+    return _image_file_response(path, variant=variant)

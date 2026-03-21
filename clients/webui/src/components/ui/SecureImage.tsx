@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../../api";
+import { api, type ImageBlobLoadKind } from "../../api";
+
+function imagePathWithVariant(path: string, variant: "full" | "thumb"): string {
+  if (variant === "full") return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}variant=thumb`;
+}
 
 interface SecureImageProps {
   path: string;
@@ -7,9 +13,11 @@ interface SecureImageProps {
   className?: string;
   /** Load immediately (modal hero, above-the-fold). */
   priority?: boolean;
+  /** Use server-resized thumbnail for grids and previews; modals should use full. */
+  variant?: "full" | "thumb";
 }
 
-export function SecureImage({ path, alt, className, priority }: SecureImageProps) {
+export function SecureImage({ path, alt, className, priority, variant = "full" }: SecureImageProps) {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [shouldLoad, setShouldLoad] = useState(Boolean(priority));
@@ -17,7 +25,7 @@ export function SecureImage({ path, alt, className, priority }: SecureImageProps
 
   useEffect(() => {
     setShouldLoad(Boolean(priority));
-  }, [path, priority]);
+  }, [path, priority, variant]);
 
   useEffect(() => {
     if (priority) return;
@@ -41,7 +49,7 @@ export function SecureImage({ path, alt, className, priority }: SecureImageProps
 
     observer.observe(element);
     return () => observer.disconnect();
-  }, [path, priority]);
+  }, [path, priority, variant]);
 
   useEffect(() => {
     if (!shouldLoad) return;
@@ -49,8 +57,10 @@ export function SecureImage({ path, alt, className, priority }: SecureImageProps
     let currentUrl: string | null = null;
     setFailed(false);
     setSrc(null);
+    const fetchPath = imagePathWithVariant(path, variant);
+    const loadKind: ImageBlobLoadKind = variant === "thumb" ? "thumb" : "full";
     void api
-      .secureBlob(path)
+      .secureBlob(fetchPath, { loadKind })
       .then((blob) => {
         if (!active) return;
         currentUrl = URL.createObjectURL(blob);
@@ -63,7 +73,7 @@ export function SecureImage({ path, alt, className, priority }: SecureImageProps
       active = false;
       if (currentUrl) URL.revokeObjectURL(currentUrl);
     };
-  }, [path, shouldLoad]);
+  }, [path, shouldLoad, variant]);
 
   if (failed) return <div ref={containerRef} className={`image-fallback ${className || ""}`}>Image unavailable</div>;
   if (!src) {

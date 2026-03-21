@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { CalendarResponse, CalendarYearResponse, ScreenshotItem, User } from "../../api";
 import type { ScreenshotListResponse } from "../../api";
 import type { Loadable } from "../../hooks/useLoadable";
-import { formatDateTime, formatDifficulty, formatLiveType, formatShortDate, webLocale } from "../../utils/format";
+import { formatShortDate, webLocale } from "../../utils/format";
 import { CalendarHeatmap } from "../charts/CalendarHeatmap";
 import { EmptyState } from "../ui/EmptyState";
 import { LoadingInline } from "../ui/LoadingCard";
-import { SecureImage } from "../ui/SecureImage";
-import { ResultStatGrid } from "../screenshots/ResultStatGrid";
+import { ScreenshotModal, type ScreenshotModalItem } from "../screenshots/ScreenshotModal";
+import { CalendarHourGrid } from "./CalendarHourGrid";
 
-export type CalendarExplorerMode = "year" | "month" | "week" | "day";
+export type CalendarExplorerMode = "year" | "month" | "week" | "day" | "event";
 
 function dateKey(date: Date) {
   const year = date.getFullYear();
@@ -27,6 +27,7 @@ function parseDateKey(value: string) {
 }
 
 export function stepCalendarAnchor(mode: CalendarExplorerMode, anchor: Date, direction: -1 | 1) {
+  if (mode === "event") return new Date(anchor.getTime());
   const next = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
   if (mode === "year") {
     next.setFullYear(next.getFullYear() + direction);
@@ -44,7 +45,19 @@ export function stepCalendarAnchor(mode: CalendarExplorerMode, anchor: Date, dir
   return next;
 }
 
-export function calendarRangeForMode(mode: CalendarExplorerMode, anchor: Date) {
+export function calendarRangeForMode(
+  mode: CalendarExplorerMode,
+  anchor: Date,
+  eventRange?: { from_date: string; to_date: string } | null,
+) {
+  if (mode === "event") {
+    if (eventRange?.from_date && eventRange?.to_date) {
+      return { from_date: eventRange.from_date, to_date: eventRange.to_date };
+    }
+    const k = dateKey(anchor);
+    return { from_date: k, to_date: k };
+  }
+
   const start = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
   const end = new Date(start);
 
@@ -68,8 +81,19 @@ export function calendarRangeForMode(mode: CalendarExplorerMode, anchor: Date) {
   };
 }
 
-function calendarLabel(mode: CalendarExplorerMode, anchor: Date, server: User["server"]) {
+function calendarLabel(
+  mode: CalendarExplorerMode,
+  anchor: Date,
+  server: User["server"],
+  eventRange?: { from_date: string; to_date: string } | null,
+) {
   const loc = webLocale(server);
+  if (mode === "event") {
+    if (eventRange?.from_date && eventRange?.to_date) {
+      return `${formatShortDate(eventRange.from_date, server)} – ${formatShortDate(eventRange.to_date, server)}`;
+    }
+    return formatShortDate(dateKey(anchor), server);
+  }
   if (mode === "year") return String(anchor.getFullYear());
   if (mode === "week") {
     const range = calendarRangeForMode("week", anchor);
@@ -79,24 +103,15 @@ function calendarLabel(mode: CalendarExplorerMode, anchor: Date, server: User["s
   return anchor.toLocaleDateString(loc, { month: "long", year: "numeric" });
 }
 
-function groupShotsByDate(items: ScreenshotItem[]) {
-  const groups = new Map<string, ScreenshotItem[]>();
-  for (const item of items) {
-    const key = item.timestamp ? item.timestamp.slice(0, 10) : "unknown";
-    const existing = groups.get(key);
-    if (existing) existing.push(item);
-    else groups.set(key, [item]);
-  }
-  return [...groups.entries()]
-    .map(([date, shots]) => ({
-      date,
-      shots: shots.slice().sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || ""))),
-    }))
-    .sort((a, b) => b.date.localeCompare(a.date));
-}
-
 function monthName(year: number, monthZeroBased: number, server: User["server"]) {
   return new Date(year, monthZeroBased, 1).toLocaleDateString(webLocale(server), { month: "short" });
+}
+
+function toModalItem(item: ScreenshotItem): ScreenshotModalItem {
+  return {
+    ...item,
+    image_available: item.image_available,
+  };
 }
 
 export function CalendarExplorerModal({
@@ -112,6 +127,8 @@ export function CalendarExplorerModal({
   yearState,
   monthState,
   shotsState,
+  showEventMode = false,
+  eventRange = null,
 }: {
   open: boolean;
   title: string;
@@ -125,36 +142,41 @@ export function CalendarExplorerModal({
   yearState: Loadable<CalendarYearResponse> & { reload: () => Promise<void> };
   monthState: Loadable<CalendarResponse> & { reload: () => Promise<void> };
   shotsState: Loadable<ScreenshotListResponse> & { reload: () => Promise<void> };
+  showEventMode?: boolean;
+  eventRange?: { from_date: string; to_date: string } | null;
 }) {
-  const [selectedShotId, setSelectedShotId] = useState<number | null>(null);
+  const [shotModalIndex, setShotModalIndex] = useState<number | null>(null);
   useEffect(() => {
-    if (!open) setSelectedShotId(null);
+    if (!open) setShotModalIndex(null);
   }, [open]);
 
-  const orderedShots = useMemo(
-    () =>
-      mode === "year" || shotsState.loading || shotsState.error
-        ? []
-        : (shotsState.data?.items || [])
-            .slice()
-            .sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || ""))),
-    [mode, shotsState.data, shotsState.loading, shotsState.error],
-  );
-  const groupedShots = useMemo(() => groupShotsByDate(orderedShots), [orderedShots]);
-  const activeShot = orderedShots.find((shot) => shot.id === selectedShotId) || orderedShots[0] || null;
-  const rangeLabel = calendarLabel(mode, anchorDate, server);
+  const explorerRange = useMemo(() => calendarRangeForMode(mode, anchorDate, eventRange), [mode, anchorDate, eventRange]);
+
+  const orderedShots = useMemo(() => {
+    if (mode === "year" || mode === "month") return [];
+    if (shotsState.error) return [];
+    const { from_date, to_date } = explorerRange;
+    const filtered = (shotsState.data?.items || []).filter((s) => {
+      const dk = s.timestamp?.slice(0, 10);
+      if (!dk) return false;
+      return dk >= from_date && dk <= to_date;
+    });
+    return filtered.sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
+  }, [mode, shotsState.data, shotsState.error, explorerRange.from_date, explorerRange.to_date]);
+
+  const modalItems = useMemo(() => orderedShots.map(toModalItem), [orderedShots]);
+
+  const rangeLabel = calendarLabel(mode, anchorDate, server, eventRange);
   const yearData = yearState.data;
   const yearBase = yearData ? Math.max(...yearData.months.map((item) => item.plays), 1) : 1;
 
-  useEffect(() => {
-    if (!orderedShots.length) {
-      setSelectedShotId(null);
-      return;
-    }
-    if (selectedShotId == null || !orderedShots.some((shot) => shot.id === selectedShotId)) {
-      setSelectedShotId(orderedShots[0]!.id);
-    }
-  }, [orderedShots, selectedShotId]);
+  const shotsIdle = mode === "year" || mode === "month";
+  const showShotListLoading = !shotsIdle && shotsState.loading && orderedShots.length === 0;
+  const showShotError = !shotsIdle && Boolean(shotsState.error);
+  const showHourGrid = !shotsIdle && !shotsState.error && orderedShots.length > 0;
+  const showShotEmpty = !shotsIdle && !shotsState.loading && !shotsState.error && orderedShots.length === 0;
+
+  const eventOptionVisible = showEventMode && Boolean(eventRange?.from_date && eventRange?.to_date);
 
   if (!open) return null;
 
@@ -166,24 +188,35 @@ export function CalendarExplorerModal({
             <h3>{title}</h3>
             <div className="inline-meta">
               {subtitle || rangeLabel}
-              {orderedShots.length ? ` · ${orderedShots.length} screenshots` : ""}
+              {!shotsIdle && orderedShots.length ? ` · ${orderedShots.length} screenshots` : ""}
             </div>
           </div>
           <div className="button-row tight calendar-modal__toolbar">
-            <label className="field inline-field calendar-modal__mode">
-              <span>Mode</span>
+            <div className="calendar-modal__mode">
+              <span className="calendar-modal__mode-label">Mode</span>
               <select value={mode} onChange={(event) => onModeChange(event.target.value as CalendarExplorerMode)}>
                 <option value="year">Year</option>
                 <option value="month">Month</option>
                 <option value="week">Week</option>
                 <option value="day">Day</option>
+                {eventOptionVisible ? <option value="event">Event</option> : null}
               </select>
-            </label>
-            <button className="button ghost" type="button" onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, -1))}>
+            </div>
+            <button
+              className="button ghost"
+              type="button"
+              disabled={mode === "event"}
+              onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, -1))}
+            >
               Prev
             </button>
             <div className="toolbar-chip">{rangeLabel}</div>
-            <button className="button ghost" type="button" onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, 1))}>
+            <button
+              className="button ghost"
+              type="button"
+              disabled={mode === "event"}
+              onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, 1))}
+            >
               Next
             </button>
             <button className="button ghost" type="button" onClick={onClose}>
@@ -252,99 +285,41 @@ export function CalendarExplorerModal({
               </div>
             ) : null}
 
-            {(mode === "week" || mode === "day") && shotsState.loading ? (
-              <LoadingInline />
-            ) : (mode === "week" || mode === "day") && shotsState.error ? (
+            {showShotListLoading ? <LoadingInline /> : null}
+            {showShotError ? (
               <div className="stack">
                 <EmptyState text={`Could not load screenshots: ${shotsState.error}`} />
                 <button className="button ghost" type="button" onClick={() => void shotsState.reload()}>
                   Retry
                 </button>
               </div>
-            ) : (mode === "week" || mode === "day") && groupedShots.length > 0 ? (
-              <div className="calendar-modal__groups">
-                {groupedShots.map((group) => (
-                  <div className="calendar-modal__group" key={group.date}>
-                    <div className="calendar-modal__group-head">
-                      <button
-                        type="button"
-                        className="calendar-modal__group-button"
-                        onClick={() => {
-                          onAnchorDateChange(parseDateKey(group.date));
-                          onModeChange("day");
-                        }}
-                      >
-                        {formatShortDate(group.date, server)}
-                      </button>
-                      <span>{group.shots.length} screenshots</span>
-                    </div>
-                    <div className="calendar-modal__shot-list">
-                      {group.shots.map((shot) => (
-                        <button
-                          key={shot.id}
-                          type="button"
-                          className={selectedShotId === shot.id ? "calendar-modal__shot active" : "calendar-modal__shot"}
-                          onClick={() => setSelectedShotId(shot.id)}
-                        >
-                          <div className="calendar-modal__shot-thumb">
-                            {shot.image_available && shot.image_url ? (
-                              <SecureImage path={shot.image_url} alt={shot.filename || shot.song_name || `screenshot-${shot.id}`} className="calendar-modal__shot-image" />
-                            ) : (
-                              <div className="gallery-placeholder calendar-modal__shot-placeholder">No image</div>
-                            )}
-                          </div>
-                          <div className="calendar-modal__shot-body">
-                            <strong>{shot.song_name || `Song ${shot.song_id}`}</strong>
-                            <span>
-                              {formatDifficulty(shot.difficulty)} · {formatLiveType(shot.live_type)}
-                            </span>
-                            <small>{formatDateTime(shot.timestamp, server)}</small>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
             ) : null}
-
-            {!orderedShots.length && mode !== "year" && !shotsState.loading ? <EmptyState text="No screenshots found for this range." /> : null}
-          </div>
-
-          <div className="calendar-modal__detail">
-            {activeShot ? (
-              <div className="stack">
-                <div className="calendar-modal__detail-head">
-                  <div>
-                    <div className="brand-kicker">{formatDifficulty(activeShot.difficulty)}</div>
-                    <h4>{activeShot.song_name || `Song ${activeShot.song_id}`}</h4>
-                  </div>
-                  <div className="badge-row">
-                    {activeShot.full_combo ? <span className="badge fc">FC</span> : null}
-                    {activeShot.all_perfect ? <span className="badge ap">AP</span> : null}
-                    {activeShot.anomaly ? <span className="badge warn">!</span> : null}
-                  </div>
-                </div>
-                <div className="calendar-modal__detail-meta inline-meta">
-                  {formatLiveType(activeShot.live_type)}
-                  {activeShot.level != null ? ` · Lv. ${activeShot.level}` : ""}
-                  {activeShot.timestamp ? ` · ${formatDateTime(activeShot.timestamp, server)}` : ""}
-                </div>
-                {activeShot.image_url && activeShot.image_available !== false ? (
-                  <SecureImage path={activeShot.image_url} alt={activeShot.filename || activeShot.song_name || "screenshot"} className="viewer-image" priority />
-                ) : (
-                  <EmptyState text="Image not available for this screenshot." />
-                )}
-                <ResultStatGrid item={activeShot} server={server} showMetaFooter />
-              </div>
-            ) : shotsState.loading ? (
-              <LoadingInline />
-            ) : (
-              <EmptyState text="Pick a screenshot to inspect its full stats." />
-            )}
+            {showHourGrid ? (
+              <CalendarHourGrid
+                from_date={explorerRange.from_date}
+                to_date={explorerRange.to_date}
+                shots={orderedShots}
+                server={server}
+                onShotClick={(shot) => {
+                  const idx = orderedShots.findIndex((s) => s.id === shot.id);
+                  if (idx >= 0) setShotModalIndex(idx);
+                }}
+              />
+            ) : null}
+            {showShotEmpty ? <EmptyState text="No screenshots found for this range." /> : null}
           </div>
         </div>
       </div>
+      {shotModalIndex != null && modalItems.length ? (
+        <ScreenshotModal
+          elevated
+          items={modalItems}
+          index={shotModalIndex}
+          server={server}
+          onClose={() => setShotModalIndex(null)}
+          onIndexChange={setShotModalIndex}
+        />
+      ) : null}
     </div>
   );
 }

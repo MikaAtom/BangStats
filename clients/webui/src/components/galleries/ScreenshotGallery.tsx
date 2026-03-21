@@ -33,7 +33,7 @@ export function ScreenshotGallery({ items, server }: ScreenshotGalleryProps) {
               onOpen={() => setActiveIndex(index)}
               thumb={
                 item.image_available && item.image_url ? (
-                  <SecureImage path={item.image_url} alt={item.filename || `screenshot-${item.id}`} className="compact-shot-thumb" />
+                  <SecureImage path={item.image_url} alt={item.filename || `screenshot-${item.id}`} className="compact-shot-thumb" variant="thumb" />
                 ) : (
                   <div className="gallery-placeholder compact-shot-thumb">No image</div>
                 )

@@ -24,9 +24,11 @@ type ScreenshotModalProps = {
   server: User["server"];
   onClose: () => void;
   onIndexChange: (next: number) => void;
+  /** Renders above another open modal (e.g. calendar explorer). */
+  elevated?: boolean;
 };
 
-export function ScreenshotModal({ items, index, server, onClose, onIndexChange }: ScreenshotModalProps) {
+export function ScreenshotModal({ items, index, server, onClose, onIndexChange, elevated }: ScreenshotModalProps) {
   const item = items[index];
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -44,7 +46,7 @@ export function ScreenshotModal({ items, index, server, onClose, onIndexChange }
   const diffLabel = item.difficulty ? formatDifficulty(item.difficulty) : "";
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <div className={`modal-backdrop${elevated ? " modal-backdrop--stack" : ""}`} role="presentation" onClick={onClose}>
       <div className="modal modal-wide" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div>

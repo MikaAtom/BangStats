@@ -607,17 +607,24 @@ function appendAnalyticsFilters(params: URLSearchParams, filters?: AnalyticsFilt
 
 type UnauthorizedHandler = () => void;
 
+/** How image blob fetches participate in concurrency limits and cache TTL. */
+export type ImageBlobLoadKind = "full" | "thumb";
+
 class ApiClient {
   private token: string | null = null;
   private unauthorizedHandler: UnauthorizedHandler | null = null;
   private readonly cacheTtlMs = 2 * 60 * 1000;
+  private readonly blobCacheTtlThumbMs = 30 * 60 * 1000;
   private readonly maxBlobConcurrency = 4;
+  private readonly maxThumbBlobConcurrency = 12;
   private readonly jsonCache = new Map<string, { expiresAt: number; value: unknown }>();
   private readonly inFlightJson = new Map<string, Promise<unknown>>();
   private readonly blobCache = new Map<string, { expiresAt: number; value: Blob }>();
   private readonly inFlightBlob = new Map<string, Promise<Blob>>();
-  private activeBlobRequests = 0;
+  private activeFullBlobRequests = 0;
+  private activeThumbBlobRequests = 0;
   private readonly blobQueue: Array<() => void> = [];
+  private readonly thumbBlobQueue: Array<() => void> = [];
 
   private buildCacheKey(path: string, method: string) {
     return `${method}::${path}::${this.token || "anon"}`;
@@ -636,21 +643,40 @@ class ApiClient {
     this.blobCache.clear();
   }
 
-  private async acquireBlobSlot() {
-    if (this.activeBlobRequests < this.maxBlobConcurrency) {
-      this.activeBlobRequests += 1;
+  private async acquireBlobSlot(kind: ImageBlobLoadKind) {
+    if (kind === "thumb") {
+      if (this.activeThumbBlobRequests < this.maxThumbBlobConcurrency) {
+        this.activeThumbBlobRequests += 1;
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        this.thumbBlobQueue.push(() => {
+          this.activeThumbBlobRequests += 1;
+          resolve();
+        });
+      });
+      return;
+    }
+    if (this.activeFullBlobRequests < this.maxBlobConcurrency) {
+      this.activeFullBlobRequests += 1;
       return;
     }
     await new Promise<void>((resolve) => {
       this.blobQueue.push(() => {
-        this.activeBlobRequests += 1;
+        this.activeFullBlobRequests += 1;
         resolve();
       });
     });
   }
 
-  private releaseBlobSlot() {
-    this.activeBlobRequests = Math.max(0, this.activeBlobRequests - 1);
+  private releaseBlobSlot(kind: ImageBlobLoadKind) {
+    if (kind === "thumb") {
+      this.activeThumbBlobRequests = Math.max(0, this.activeThumbBlobRequests - 1);
+      const next = this.thumbBlobQueue.shift();
+      if (next) next();
+      return;
+    }
+    this.activeFullBlobRequests = Math.max(0, this.activeFullBlobRequests - 1);
     const next = this.blobQueue.shift();
     if (next) next();
   }
@@ -745,10 +771,12 @@ class ApiClient {
     }
   }
 
-  async secureBlob(path: string) {
+  async secureBlob(path: string, options: { loadKind?: ImageBlobLoadKind } = {}) {
     const method = "GET";
+    const loadKind: ImageBlobLoadKind = options.loadKind ?? "full";
     const cacheKey = this.buildCacheKey(path, method);
     const cached = this.blobCache.get(cacheKey);
+    const ttlMs = loadKind === "thumb" ? this.blobCacheTtlThumbMs : this.cacheTtlMs;
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value;
     }
@@ -760,25 +788,25 @@ class ApiClient {
     }
 
     const execute = async () => {
-    await this.acquireBlobSlot();
-    try {
-    const headers = new Headers();
-    if (this.token) {
-      headers.set("Authorization", `Bearer ${this.token}`);
-    }
-    const response = await fetch(path, { headers });
-    if (!response.ok) {
-      throw new Error("Image request failed");
-    }
-      const blob = await response.blob();
-      this.blobCache.set(cacheKey, {
-        expiresAt: Date.now() + this.cacheTtlMs,
-        value: blob,
-      });
-      return blob;
-    } finally {
-      this.releaseBlobSlot();
-    }
+      await this.acquireBlobSlot(loadKind);
+      try {
+        const headers = new Headers();
+        if (this.token) {
+          headers.set("Authorization", `Bearer ${this.token}`);
+        }
+        const response = await fetch(path, { headers });
+        if (!response.ok) {
+          throw new Error("Image request failed");
+        }
+        const blob = await response.blob();
+        this.blobCache.set(cacheKey, {
+          expiresAt: Date.now() + ttlMs,
+          value: blob,
+        });
+        return blob;
+      } finally {
+        this.releaseBlobSlot(loadKind);
+      }
     };
 
     const inFlight = execute();
