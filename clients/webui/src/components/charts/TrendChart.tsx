@@ -7,7 +7,7 @@ interface TrendChartProps {
 
 export function TrendChart({ data, summaryMode = "grid" }: TrendChartProps) {
   if (!data.points.length) {
-    return <div className="inline-meta">No progression points available.</div>;
+    return <div className="empty-state">No progression points in this range — try another scope or filters.</div>;
   }
 
   const width = 1000;
@@ -31,12 +31,15 @@ export function TrendChart({ data, summaryMode = "grid" }: TrendChartProps) {
 
   return (
     <div className="stack">
+      <div className="inline-meta">Line: skill score per period · Hover dots for full stats</div>
       <div className="trend-chart-shell">
         <svg viewBox={`0 0 ${width} ${height}`} className="trend-chart" role="img" aria-label="Skill progression chart">
           <path d={path} className="trend-line" />
           {points.map((point) => (
             <g key={point.label}>
-              <circle cx={point.x} cy={point.y} r="5" className="trend-dot" />
+              <circle cx={point.x} cy={point.y} r="5" className="trend-dot">
+                <title>{`${point.label}: skill ${point.skill_score}, ${point.plays} plays, ${point.accuracy}% acc, ${point.fc} FC / ${point.ap} AP`}</title>
+              </circle>
               <text x={point.x} y={point.y - 10} textAnchor="middle" className="trend-value-label">
                 {point.skill_score}
               </text>

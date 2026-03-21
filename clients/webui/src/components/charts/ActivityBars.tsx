@@ -14,6 +14,9 @@ export function ActivityBars({ data }: ActivityBarsProps) {
   ];
   return (
     <div className="stack">
+      <div className="inline-meta">
+        Summary metrics for the selected window ({data.from_date} → {data.to_date}).
+      </div>
       <BarChart items={items} />
       <div className="inline-meta">
         Delta vs previous: {data.delta_vs_previous.plays_delta} plays, {data.delta_vs_previous.accuracy_delta}% accuracy

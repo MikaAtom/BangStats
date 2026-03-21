@@ -13,6 +13,74 @@ def _to_notes_total(play: Any) -> int:
     )
 
 
+def _single_play_accuracy(play: Any) -> float:
+    notes = _to_notes_total(play)
+    if notes <= 0:
+        return 0.0
+    return round((int(getattr(play, "perfect", 0)) / notes) * 100, 2)
+
+
+def _latest_play_meta_for_predicate(plays: List[Any], predicate) -> Optional[Dict[str, Any]]:
+    matching = [p for p in plays if predicate(p)]
+    if not matching:
+        return None
+    latest = max(matching, key=lambda p: getattr(p, "timestamp", datetime.min))
+    return _to_play_meta(latest)
+
+
+def _build_recap_daily_digest(
+    plays: List[Any],
+    from_date: date,
+    to_date: date,
+    sessions: List[List[Any]],
+) -> List[Dict[str, Any]]:
+    session_starts: Dict[date, int] = defaultdict(int)
+    for session in sessions:
+        si = _to_session_item(session)
+        sa = si.get("started_at")
+        if isinstance(sa, datetime):
+            d = sa.date()
+            if from_date <= d <= to_date:
+                session_starts[d] += 1
+    by_day: Dict[date, Dict[str, Any]] = defaultdict(
+        lambda: {"plays": 0, "fc": 0, "ap": 0, "perfect": 0, "notes": 0}
+    )
+    for play in plays:
+        ts = getattr(play, "timestamp", None)
+        if not isinstance(ts, datetime):
+            continue
+        d = ts.date()
+        if not (from_date <= d <= to_date):
+            continue
+        b = by_day[d]
+        b["plays"] += 1
+        b["fc"] += 1 if bool(getattr(play, "full_combo", False)) else 0
+        b["ap"] += 1 if bool(getattr(play, "all_perfect", False)) else 0
+        b["perfect"] += int(getattr(play, "perfect", 0))
+        b["notes"] += _to_notes_total(play)
+    out: List[Dict[str, Any]] = []
+    cur = from_date
+    while cur <= to_date:
+        b = by_day.get(
+            cur,
+            {"plays": 0, "fc": 0, "ap": 0, "perfect": 0, "notes": 0},
+        )
+        notes = int(b.get("notes", 0))
+        acc = round((int(b["perfect"]) / notes) * 100, 2) if notes > 0 else 0.0
+        out.append(
+            {
+                "date": cur.isoformat(),
+                "plays": int(b["plays"]),
+                "fc": int(b["fc"]),
+                "ap": int(b["ap"]),
+                "accuracy": acc,
+                "sessions": int(session_starts.get(cur, 0)),
+            }
+        )
+        cur += timedelta(days=1)
+    return out
+
+
 def _to_play_meta(play: Any) -> Dict[str, Any]:
     return {
         "timestamp": getattr(play, "timestamp", None),
@@ -71,7 +139,8 @@ def compute_song_rankings(
     song_names: Dict[int, str] | None = None,
     sort_by: str = "play_count",
     limit: int = 25,
-) -> List[Dict[str, Any]]:
+    offset: int = 0,
+) -> tuple[List[Dict[str, Any]], int]:
     grouped: Dict[int, List[Any]] = defaultdict(list)
     for play in screenshots:
         song_id = int(getattr(play, "song_id", 0))
@@ -100,7 +169,11 @@ def compute_song_rankings(
         "ap_count": lambda item: (int(item["ap_count"]), int(item["play_count"])),
     }
     key_fn = sort_key_map.get(sort_by, sort_key_map["play_count"])
-    return sorted(rows, key=key_fn, reverse=True)[: max(1, int(limit))]
+    ordered_rows = sorted(rows, key=key_fn, reverse=True)
+    total = len(ordered_rows)
+    start = max(0, int(offset))
+    end = start + max(1, int(limit))
+    return ordered_rows[start:end], total
 
 
 def compute_recent_plays(screenshots: List[Any], n: int = 5) -> List[Dict[str, Any]]:
@@ -497,6 +570,36 @@ def compute_calendar_month_view(
         "total_days_with_plays": len(days),
         "days": days,
     }
+
+
+def compute_calendar_year_view(screenshots: List[Any], *, year: int) -> Dict[str, Any]:
+    buckets: Dict[int, Dict[str, Any]] = {
+        m: {"plays": 0, "fc": 0, "ap": 0, "days": set()} for m in range(1, 13)
+    }
+    y = int(year)
+    for play in screenshots:
+        ts = getattr(play, "timestamp", None)
+        if not isinstance(ts, datetime) or ts.year != y:
+            continue
+        m = int(ts.month)
+        b = buckets[m]
+        b["plays"] += 1
+        b["fc"] += 1 if bool(getattr(play, "full_combo", False)) else 0
+        b["ap"] += 1 if bool(getattr(play, "all_perfect", False)) else 0
+        b["days"].add(ts.date())
+    months: List[Dict[str, Any]] = []
+    for m in range(1, 13):
+        b = buckets[m]
+        months.append(
+            {
+                "month": m,
+                "plays": int(b["plays"]),
+                "fc": int(b["fc"]),
+                "ap": int(b["ap"]),
+                "active_days": len(b["days"]),
+            }
+        )
+    return {"year": y, "months": months}
 
 
 def _filter_plays_in_date_range(
@@ -930,41 +1033,66 @@ def compute_song_journey(
         song_length_seconds=song_length_seconds,
         session_gap_minutes=session_gap_minutes,
     )
-    ordered = sorted(plays, key=lambda play: getattr(play, "timestamp", datetime.min))
-    practice_periods = _compute_practice_periods(
-        ordered,
-        song_lengths_seconds={song_id: song_length_seconds},
-        min_burst_plays=2,
+    ordered = sorted(
+        [p for p in plays if isinstance(getattr(p, "timestamp", None), datetime)],
+        key=lambda play: getattr(play, "timestamp"),
     )
+    events: List[tuple[datetime, str, Any, str, Dict[str, Any]]] = []
+    milestone_play_ids: set[int] = set()
+
+    if ordered:
+        p0 = ordered[0]
+        events.append((p0.timestamp, "first_play", p0, "First play", {}))
+        milestone_play_ids.add(id(p0))
+
+    for threshold in (25, 50, 100, 250, 500):
+        if len(ordered) >= threshold:
+            p = ordered[threshold - 1]
+            events.append((p.timestamp, "play_milestone", p, f"After {threshold} plays", {"threshold": threshold}))
+            milestone_play_ids.add(id(p))
+
+    if len(ordered) > 1:
+        best_i = max(range(len(ordered)), key=lambda i: _single_play_accuracy(ordered[i]))
+        bp = ordered[best_i]
+        acc = _single_play_accuracy(bp)
+        first_acc = _single_play_accuracy(ordered[0])
+        if acc > first_acc + 1.0 or acc >= 99.0:
+            events.append((bp.timestamp, "best_accuracy", bp, f"Best accuracy ({acc}%)", {"accuracy": acc}))
+
+    fc_i = next((i for i, p in enumerate(ordered) if bool(getattr(p, "full_combo", False))), None)
+    if fc_i is not None:
+        p = ordered[fc_i]
+        events.append(
+            (p.timestamp, "first_fc", p, "First Full Combo", {"plays_to_fc": fc_i + 1}),
+        )
+
+    ap_i = next((i for i, p in enumerate(ordered) if bool(getattr(p, "all_perfect", False))), None)
+    if ap_i is not None:
+        p = ordered[ap_i]
+        events.append(
+            (p.timestamp, "first_ap", p, "First All Perfect", {"plays_to_ap": ap_i + 1}),
+        )
+
+    events.sort(key=lambda x: x[0])
+    seen_keys: set[tuple[Any, str, Any]] = set()
     timeline: List[Dict[str, Any]] = []
-    for key, label in [
-        ("first_played", "First play"),
-        ("first_fc", "First Full Combo"),
-        ("first_ap", "First All Perfect"),
-        ("last_played", "Latest play"),
-    ]:
-        meta = detail.get(key)
-        if meta:
-            timeline.append(
-                {
-                    "type": key,
-                    "label": label,
-                    "timestamp": meta.get("timestamp"),
-                    "filename": meta.get("filename"),
-                    "details": {},
-                }
-            )
-    for period in practice_periods[:6]:
+    for ts, typ, play, label, det in events:
+        fn = getattr(play, "filename", None)
+        key = (ts, typ, fn)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        meta = _to_play_meta(play)
         timeline.append(
             {
-                "type": "practice_period",
-                "label": f"Practice burst ({period.get('max_burst_plays', 0)} plays)",
-                "timestamp": period.get("latest_burst_at"),
-                "filename": None,
-                "details": period,
+                "type": typ,
+                "label": label,
+                "timestamp": meta.get("timestamp"),
+                "filename": meta.get("filename"),
+                "details": det,
             }
         )
-    timeline = sorted(timeline, key=lambda item: item.get("timestamp") or datetime.min)
+
     return {
         "song_id": song_id,
         "song_name": song_name,
@@ -976,7 +1104,6 @@ def compute_song_journey(
         "plays_before_fc": detail.get("plays_before_fc"),
         "plays_before_ap": detail.get("plays_before_ap"),
         "skill_score": detail.get("skill_score", 0.0),
-        "practice_periods": practice_periods,
         "timeline": timeline,
     }
 
@@ -1022,9 +1149,9 @@ def compute_recap(
         if int(getattr(play, "song_id", 0)) > 0
     }
     new_song_rows = [row for row in top_song_rows if row["song_id"] not in prior_song_ids][:8]
-    most_practiced = sorted(top_song_rows, key=lambda item: (int(item["fc_count"]) + int(item["ap_count"]), int(item["play_count"])), reverse=True)[:8]
     sessions = _sessionize_plays(plays, session_gap_minutes=45)
     milestones = compute_milestones(plays)
+    daily_digest = _build_recap_daily_digest(plays, from_date, to_date, sessions)
     highlights: List[Dict[str, Any]] = []
     if top_song_rows:
         highlights.append(
@@ -1035,26 +1162,71 @@ def compute_recap(
                 "screenshot": top_song_rows[0].get("latest_play"),
             }
         )
+    fc_shot = _latest_play_meta_for_predicate(plays, lambda p: bool(getattr(p, "full_combo", False)))
     if summary.get("total_fc", 0):
-        top_fc = next((row for row in top_song_rows if int(row.get("fc_count", 0)) > 0), None)
         highlights.append(
             {
                 "title": "Full Combo push",
                 "value": str(summary["total_fc"]),
                 "detail": "Full Combo clears recorded in this range.",
-                "screenshot": top_fc.get("latest_play") if top_fc else None,
+                "screenshot": fc_shot,
             }
         )
+    ap_shot = _latest_play_meta_for_predicate(plays, lambda p: bool(getattr(p, "all_perfect", False)))
     if summary.get("total_ap", 0):
-        top_ap = next((row for row in top_song_rows if int(row.get("ap_count", 0)) > 0), None)
         highlights.append(
             {
                 "title": "All Perfect streak",
                 "value": str(summary["total_ap"]),
                 "detail": "All Perfect clears recorded in this range.",
-                "screenshot": top_ap.get("latest_play") if top_ap else None,
+                "screenshot": ap_shot,
             }
         )
+
+    overdue_min = 40
+    overdue_fc_rows = [row for row in top_song_rows if int(row["play_count"]) >= overdue_min and int(row["fc_count"]) == 0]
+    if overdue_fc_rows:
+        worst = max(overdue_fc_rows, key=lambda r: int(r["play_count"]))
+        highlights.append(
+            {
+                "title": "Long overdue Full Combo",
+                "value": worst["song_name"] or f"Song {worst['song_id']}",
+                "detail": f"{worst['play_count']} plays in this range with no FC yet.",
+                "screenshot": worst.get("latest_play"),
+            }
+        )
+    overdue_ap_rows = [
+        row
+        for row in top_song_rows
+        if int(row["play_count"]) >= overdue_min and int(row["fc_count"]) > 0 and int(row["ap_count"]) == 0
+    ]
+    if overdue_ap_rows:
+        worst_ap = max(overdue_ap_rows, key=lambda r: int(r["play_count"]))
+        highlights.append(
+            {
+                "title": "Long overdue All Perfect",
+                "value": worst_ap["song_name"] or f"Song {worst_ap['song_id']}",
+                "detail": f"{worst_ap['play_count']} plays with FC but no AP in this range.",
+                "screenshot": worst_ap.get("latest_play"),
+            }
+        )
+
+    if len(plays) >= 3:
+        peak_play = max(plays, key=_single_play_accuracy)
+        peak_acc = _single_play_accuracy(peak_play)
+        if peak_acc >= 95.0:
+            sid = int(getattr(peak_play, "song_id", 0))
+            peak_name = (song_names or {}).get(sid) if sid else None
+            highlights.append(
+                {
+                    "title": "Peak accuracy",
+                    "value": f"{peak_acc}%",
+                    "detail": f"Best single-play accuracy in this range"
+                    + (f" ({peak_name})." if peak_name else "."),
+                    "screenshot": _to_play_meta(peak_play),
+                }
+            )
+
     return {
         "scope": scope,
         "title": _date_range_label(scope, from_date=from_date, to_date=to_date),
@@ -1067,10 +1239,11 @@ def compute_recap(
         "skill_score_delta": round(float(summary.get("skill_score", 0.0)) - float(compare_summary.get("skill_score", 0.0)), 2),
         "top_songs": top_song_rows[:8],
         "new_songs": new_song_rows,
-        "most_practiced": most_practiced,
+        "most_practiced": [],
         "live_types": compute_live_type_distribution(plays),
         "active_hours": compute_active_hours(plays),
         "highlights": highlights,
+        "daily_digest": daily_digest,
         "streaks": {
             "best_daily": milestones.get("best_streak_days", 0),
             "current_daily": milestones.get("current_streak_days", 0),

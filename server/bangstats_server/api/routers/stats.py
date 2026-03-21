@@ -15,6 +15,7 @@ from bangstats_server.api.schemas.stats import (
     SongJourneyResponse,
     StatsActivityRangeResponse,
     StatsCalendarResponse,
+    StatsCalendarYearResponse,
     StatsInsightsResponse,
     StatsMilestonesResponse,
     SongDifficultyDetail,
@@ -37,6 +38,7 @@ from bangstats_server.core.services.stats import (
     compute_activity_range,
     compute_event_stats,
     compute_calendar_month_view,
+    compute_calendar_year_view,
     compute_difficulty_detail,
     compute_general_summary,
     compute_insights,
@@ -399,6 +401,7 @@ def get_user_song_rankings(
     live_type: str | None = Query(None),
     include_meta: bool = Query(False),
     sort_by: str = Query("play_count"),
+    offset: int = Query(0, ge=0, le=500_000),
     limit: int = Query(25, ge=1, le=100),
     current_user: User = Depends(get_current_user),
 ):
@@ -414,11 +417,12 @@ def get_user_song_rankings(
     image_resolver = _ImageUrlResolver(user_id, current_user, screenshots)
     song_ids = [int(getattr(item, "song_id", 0) or 0) for item in screenshots]
     song_names = _song_names_for_ids(song_service, current_user.server, song_ids)
-    rankings = compute_song_rankings(
+    rankings, total = compute_song_rankings(
         screenshots,
         song_names=song_names,
         sort_by=sort_by,
         limit=limit,
+        offset=offset,
     )
     for item in rankings:
         item["latest_play"] = _with_image_url(image_resolver, item.get("latest_play"))
@@ -427,6 +431,9 @@ def get_user_song_rankings(
         difficulty=difficulty.strip().lower() if isinstance(difficulty, str) and difficulty.strip() else None,
         live_type=live_type.strip().lower() if isinstance(live_type, str) and live_type.strip() else None,
         items=rankings,
+        total=total,
+        offset=offset,
+        limit=limit,
         exclusion_context=exclusion_context,
     )
 
@@ -598,6 +605,26 @@ def get_user_stats_calendar(
             month=selected_month,
         )
     )
+
+
+@router.get("/users/{user_id}/stats/calendar/year", response_model=StatsCalendarYearResponse)
+def get_user_stats_calendar_year(
+    user_id: int,
+    year: int = Query(..., ge=2000, le=2200),
+    difficulty: str | None = Query(None),
+    live_type: str | None = Query(None),
+    include_meta: bool = Query(False),
+    current_user: User = Depends(get_current_user),
+):
+    user_id = assert_user_scope(user_id, current_user)
+    screenshots, _ = _filtered_user_screenshots(
+        user_id,
+        current_user,
+        difficulty=difficulty,
+        live_type=live_type,
+        include_meta=include_meta,
+    )
+    return StatsCalendarYearResponse(**compute_calendar_year_view(screenshots, year=year))
 
 
 @router.get("/users/{user_id}/stats/insights", response_model=StatsInsightsResponse)

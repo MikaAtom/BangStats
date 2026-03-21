@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Link,
   NavLink,
@@ -12,18 +12,19 @@ import {
   useSearchParams,
 } from "react-router-dom";
 
+import { useLoadable } from "./hooks/useLoadable";
 import { useAuth } from "./auth";
 import {
   api,
   type ActivityResponse,
   type CalendarResponse,
+  type CalendarYearResponse,
   type DashboardResponse,
   type ErrorCategoryActionResponse,
   type ErrorDetail,
   type ErrorList,
   type EventStatsResponse,
   type FilenameDiffResponse,
-  type InsightsResponse,
   type MilestonesResponse,
   type MetaSongConfigResponse,
   type ProgressionResponse,
@@ -33,7 +34,6 @@ import {
   type ScanJob,
   type ScanResult,
   type ScreenshotItem,
-  type StatsRangeQuery,
   type SongJourneyResponse,
   type SongStatsResponse,
   type StatsOverview,
@@ -52,25 +52,18 @@ import {
   formatDifficulty,
   formatEventBoundary,
   formatEventLabel,
+  formatEventLabelDateOnly,
   formatLiveType,
   formatShortDate,
   groupActiveHours,
   resolveEventName,
+  webLocale,
 } from "./utils/format";
+import { dateRangeToQuery, resolveAbsoluteDateRange, sectionFiltersToQuery, type SectionFilterState } from "./stats/statsQuery";
+import { recapNavLabel, stepRecapAnchor, type RecapScope } from "./stats/recapNav";
+import { CompactScreenshotCard, ScreenshotModal, type ScreenshotModalItem } from "./components/screenshots/ScreenshotModal";
 
-type Loadable<T> = {
-  data: T | null;
-  loading: boolean;
-  error: string | null;
-};
-
-type AnalyticsView = "overview" | "progress" | "milestones" | "songs" | "events" | "recap" | "screenshots";
-
-type SectionFilterState = {
-  difficulty: string;
-  liveType: string;
-  includeMeta: boolean;
-};
+type AnalyticsView = "overview" | "progress" | "milestones" | "songs" | "recap" | "screenshots";
 
 type SidebarItem = {
   to: string;
@@ -78,15 +71,13 @@ type SidebarItem = {
   isActive: (pathname: string) => boolean;
 };
 
-type RecapScope = "weekly" | "monthly" | "seasonal" | "yearly" | "event";
-
 const DEFAULT_DATE_RANGE: DateRangeValue = {
   preset: "30d",
   from: "",
   to: "",
 };
 
-const ANALYTICS_VIEWS: AnalyticsView[] = ["overview", "progress", "milestones", "songs", "events", "recap", "screenshots"];
+const ANALYTICS_VIEWS: AnalyticsView[] = ["overview", "progress", "milestones", "songs", "recap", "screenshots"];
 const DIFFICULTY_FILTERS = ["easy", "normal", "hard", "expert", "special"];
 const LIVE_TYPE_FILTERS = ["normal_live", "event_live", "challenge_live", "multi_live", "vs_live", "free_live"];
 const CORRECTION_DIFFICULTIES = ["easy", "normal", "hard", "expert", "special"] as const;
@@ -274,64 +265,6 @@ function getSongOptions(songs: ReferenceSongItem[], query: string, server: User[
   return songs
     .filter((song) => correctionSongName(song, server).toLowerCase().includes(normalized))
     .slice(0, 12);
-}
-
-function useLoadable<T>(loader: (() => Promise<T>) | null, deps: unknown[] = []): Loadable<T> & { reload: () => Promise<void> } {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState<boolean>(Boolean(loader));
-  const [error, setError] = useState<string | null>(null);
-
-  async function reload() {
-    if (!loader) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const next = await loader();
-      setData(next);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Request failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void reload();
-  }, deps);
-
-  return { data, loading, error, reload };
-}
-
-function dateRangeToQuery(range: DateRangeValue) {
-  if (range.preset === "custom") {
-    return { from_date: range.from || undefined, to_date: range.to || undefined };
-  }
-  return { preset: range.preset };
-}
-
-function resolveAbsoluteDateRange(range: DateRangeValue): StatsRangeQuery | null {
-  if (range.preset === "custom") {
-    if (!range.from || !range.to) return null;
-    return { from_date: range.from, to_date: range.to };
-  }
-  const end = new Date();
-  const daysByPreset: Record<string, number> = { "7d": 7, "30d": 30, "90d": 90, "1y": 365 };
-  const days = daysByPreset[range.preset];
-  if (!days) return null;
-  const start = new Date(end);
-  start.setDate(end.getDate() - (days - 1));
-  return {
-    from_date: start.toISOString().slice(0, 10),
-    to_date: end.toISOString().slice(0, 10),
-  };
-}
-
-function sectionFiltersToQuery(filters: SectionFilterState) {
-  return {
-    difficulty: filters.difficulty || undefined,
-    live_type: filters.liveType || undefined,
-    include_meta: filters.includeMeta,
-  };
 }
 
 function App() {
@@ -727,7 +660,7 @@ function DashboardPage() {
             </Card>
           </div>
           <Card title="Recent screenshots">
-            <ScreenshotGallery items={data.recent_screenshots} />
+            <ScreenshotGallery items={data.recent_screenshots} server={auth.user.server} />
           </Card>
         </>
       )}
@@ -1466,7 +1399,15 @@ function ErrorDetailPage() {
 
 function StatsPage() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const requestedView = searchParams.get("view");
+
+  useEffect(() => {
+    if (requestedView === "events") {
+      navigate("/stats?view=recap&scope=event", { replace: true });
+    }
+  }, [requestedView, navigate]);
+
   const view: AnalyticsView = ANALYTICS_VIEWS.includes(requestedView as AnalyticsView)
     ? (requestedView as AnalyticsView)
     : "overview";
@@ -1474,7 +1415,7 @@ function StatsPage() {
   return (
     <div className="page-grid">
       <SectionHeader title="Analytics workspace" />
-      <nav className="analytics-subnav">
+      <nav className="analytics-subnav analytics-tabbar">
         {ANALYTICS_VIEWS.map((item) => (
           <Link
             key={item}
@@ -1489,7 +1430,6 @@ function StatsPage() {
       {view === "progress" && <ProgressAnalyticsView />}
       {view === "milestones" && <MilestonesAnalyticsView />}
       {view === "songs" && <SongsAnalyticsView />}
-      {view === "events" && <EventsAnalyticsView />}
       {view === "recap" && <RecapAnalyticsView />}
       {view === "screenshots" && <ScreenshotsAnalyticsView />}
     </div>
@@ -1506,6 +1446,7 @@ function OverviewAnalyticsView() {
   );
 
   if (!auth.user) return null;
+  const server = auth.user.server;
 
   return (
     <div className="page-grid">
@@ -1527,22 +1468,23 @@ function OverviewAnalyticsView() {
           {progression.data ? <TrendChart data={progression.data} summaryMode="list" /> : <LoadingInline />}
         </Card>
         <Card title="Recent meaningful plays">
-          {overview.data ? <RecentPlayList items={overview.data.recent} /> : <LoadingInline />}
+          {overview.data ? <RecentPlayList items={overview.data.recent} server={server} /> : <LoadingInline />}
         </Card>
       </div>
       <div className="layout-two">
         <Card title="Latest milestones">
-          {milestones.data ? <MilestoneTimeline items={milestones.data.milestones.slice(0, 6)} /> : <LoadingInline />}
+          {milestones.data ? <MilestoneTimeline items={milestones.data.milestones.slice(0, 2)} server={server} /> : <LoadingInline />}
+          <div className="inline-meta" style={{ marginTop: "0.75rem" }}>
+            <Link to="/stats?view=milestones">View all milestones</Link>
+          </div>
         </Card>
-        <Card title="Jump into analysis">
+        <Card title="Explore analytics">
           <ul className="list">
             {[
-              ["/stats?view=progress", "Open Progress to inspect skill trend, milestones, and practice periods."],
-              ["/stats?view=milestones", "Open Milestones for a dedicated timeline focused on achievement progression."],
-              ["/stats?view=songs", "Open Songs to search and rank songs with song-specific filters."],
-              ["/stats?view=events", "Open Events to inspect a single event with one event selector."],
-              ["/stats?view=recap", "Open Recap for scoped story views like weekly, monthly, or yearly."],
-              ["/stats?view=screenshots", "Open Screenshots for image-backed browsing with its own filters."],
+              ["/stats?view=progress", "Progress — trends, activity, calendar explorer."],
+              ["/stats?view=songs", "Songs — rankings and drilldown."],
+              ["/stats?view=recap&scope=event", "Recap — weekly/monthly/yearly/event scopes."],
+              ["/stats?view=screenshots", "Screenshots — browse result images."],
             ].map(([to, label]) => (
               <li key={to}>
                 <Link to={to}>{label}</Link>
@@ -1557,15 +1499,26 @@ function OverviewAnalyticsView() {
 
 function ProgressAnalyticsView() {
   const auth = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [range, setRange] = useState<DateRangeValue>(DEFAULT_DATE_RANGE);
   const [scope, setScope] = useState<"weekly" | "monthly" | "yearly">("monthly");
   const [pointCount, setPointCount] = useState(8);
   const [filters, setFilters] = useState<SectionFilterState>({ difficulty: "", liveType: "", includeMeta: false });
   const [calendarDate, setCalendarDate] = useState(() => new Date());
+  const [calMode, setCalMode] = useState<"day" | "week" | "month" | "year">("month");
+  const [exploreDay, setExploreDay] = useState<string | null>(null);
   const customRangeReady = range.preset !== "custom" || (Boolean(range.from) && Boolean(range.to));
   const filterQuery = sectionFiltersToQuery(filters);
   const rangeQuery = dateRangeToQuery(range);
   const anchorDate = resolveAbsoluteDateRange(range)?.to_date || new Date().toISOString().slice(0, 10);
+
+  useEffect(() => {
+    const d = searchParams.get("calDay");
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      setExploreDay(d);
+      setCalMode("day");
+    }
+  }, [searchParams]);
 
   const activity = useLoadable<ActivityResponse>(
     auth.user && customRangeReady ? () => api.getActivity(auth.user!.id, { ...rangeQuery, ...filterQuery }) : null,
@@ -1575,22 +1528,38 @@ function ProgressAnalyticsView() {
     auth.user ? () => api.getProgression(auth.user!.id, scope, pointCount, anchorDate, filterQuery) : null,
     [auth.user?.id, scope, pointCount, anchorDate, filters.difficulty, filters.liveType, filters.includeMeta],
   );
-  const insights = useLoadable<InsightsResponse>(
-    auth.user && customRangeReady ? () => api.getInsights(auth.user!.id, { ...rangeQuery, ...filterQuery }) : null,
-    [auth.user?.id, customRangeReady, range.preset, range.from, range.to, filters.difficulty, filters.liveType, filters.includeMeta],
-  );
   const calendar = useLoadable<CalendarResponse>(
-    auth.user
+    auth.user && (calMode === "month" || calMode === "week")
       ? () => api.getCalendar(auth.user!.id, calendarDate.getFullYear(), calendarDate.getMonth() + 1, filterQuery)
       : null,
-    [auth.user?.id, calendarDate.getFullYear(), calendarDate.getMonth(), filters.difficulty, filters.liveType, filters.includeMeta],
+    [auth.user?.id, calendarDate.getFullYear(), calendarDate.getMonth(), filters.difficulty, filters.liveType, filters.includeMeta, calMode],
+  );
+  const yearCal = useLoadable<CalendarYearResponse>(
+    auth.user && calMode === "year" ? () => api.getCalendarYear(auth.user!.id, calendarDate.getFullYear(), filterQuery) : null,
+    [auth.user?.id, calendarDate.getFullYear(), filters.difficulty, filters.liveType, filters.includeMeta, calMode],
+  );
+  const dayShots = useLoadable(
+    auth.user && calMode === "day" && exploreDay
+      ? () =>
+          api.listScreenshots(auth.user!.id, {
+            ...filterQuery,
+            from_date: exploreDay,
+            to_date: exploreDay,
+            limit: 80,
+            offset: 0,
+            sort_by: "timestamp",
+            sort_order: "desc",
+          })
+      : null,
+    [auth.user?.id, calMode, exploreDay, filters.difficulty, filters.liveType, filters.includeMeta],
   );
 
   if (!auth.user) return null;
+  const server = auth.user.server;
 
   return (
     <div className="page-grid">
-      <Card title="Progression graph controls">
+      <Card title="Analytics toolbar">
         <div className="analytics-section-controls">
           <div className="analytics-filter-row">
             <label className="field inline-field">
@@ -1614,49 +1583,114 @@ function ProgressAnalyticsView() {
                 onChange={(event) => setPointCount(Number(event.target.value))}
               />
             </label>
+            <SectionFilterControls filters={filters} onChange={setFilters} />
           </div>
-          <div className="inline-meta">Scope and point count control only the Skill progression graph below.</div>
-        </div>
-      </Card>
-      <Card title="Shared analytics filters">
-        <div className="analytics-filter-row">
-          <SectionFilterControls filters={filters} onChange={setFilters} />
-        </div>
-      </Card>
-      <Card title="Time-window controls">
-        <div className="analytics-section-controls">
           <DateRangePicker value={range} onChange={setRange} />
-          <div className="inline-meta">Date range filters Activity summary and Practice patterns. Calendar has its own month selector.</div>
+          <div className="inline-meta">Date range filters the Activity summary. Calendar uses the explorer mode below.</div>
         </div>
       </Card>
       <Card title="Skill progression">
         {progression.data ? <TrendChart data={progression.data} /> : <LoadingInline />}
       </Card>
-      <div className="layout-two">
-        <Card title={activity.data ? `Activity summary (${formatDateRange(activity.data.from_date, activity.data.to_date)})` : "Activity summary"}>
-          {activity.data ? <ActivityBars data={activity.data} /> : !customRangeReady ? <EmptyState text="Pick both custom dates to load activity." /> : <LoadingInline />}
-        </Card>
-        <Card title="Practice patterns">
-          {insights.data ? <InsightsPanel data={insights.data} /> : !customRangeReady ? <EmptyState text="Pick both custom dates to load practice insights." /> : <LoadingInline />}
-        </Card>
-      </div>
+      <Card title={activity.data ? `Activity summary (${formatDateRange(activity.data.from_date, activity.data.to_date, server)})` : "Activity summary"}>
+        {activity.data ? <ActivityBars data={activity.data} /> : !customRangeReady ? <EmptyState text="Pick both custom dates to load activity." /> : <LoadingInline />}
+      </Card>
       <Card
-        title="Calendar"
+        title="Calendar explorer"
         actions={
           <div className="button-row tight">
-            <button className="button ghost" type="button" onClick={() => setCalendarDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}>
-              Prev
-            </button>
-            <div className="toolbar-chip">
-              {calendarDate.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
-            </div>
-            <button className="button ghost" type="button" onClick={() => setCalendarDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}>
-              Next
-            </button>
+            <label className="field inline-field">
+              <span>Mode</span>
+              <select
+                value={calMode}
+                onChange={(event) => setCalMode(event.target.value as typeof calMode)}
+              >
+                <option value="day">Day</option>
+                <option value="week">Week</option>
+                <option value="month">Month</option>
+                <option value="year">Year</option>
+              </select>
+            </label>
+            {calMode !== "year" && (
+              <>
+                <button className="button ghost" type="button" onClick={() => setCalendarDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}>
+                  Prev
+                </button>
+                <div className="toolbar-chip">
+                  {calendarDate.toLocaleDateString(webLocale(server), { month: "long", year: "numeric" })}
+                </div>
+                <button className="button ghost" type="button" onClick={() => setCalendarDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}>
+                  Next
+                </button>
+              </>
+            )}
+            {calMode === "year" && (
+              <div className="button-row tight">
+                <button className="button ghost" type="button" onClick={() => setCalendarDate((prev) => new Date(prev.getFullYear() - 1, 0, 1))}>
+                  Prev year
+                </button>
+                <div className="toolbar-chip">{calendarDate.getFullYear()}</div>
+                <button className="button ghost" type="button" onClick={() => setCalendarDate((prev) => new Date(prev.getFullYear() + 1, 0, 1))}>
+                  Next year
+                </button>
+              </div>
+            )}
           </div>
         }
       >
-        {calendar.data ? <CalendarHeatmap data={calendar.data} /> : <LoadingInline />}
+        {calMode === "month" && (calendar.data ? <CalendarHeatmap data={calendar.data} onDayClick={(iso) => {
+          setExploreDay(iso);
+          setCalMode("day");
+          const p = new URLSearchParams(searchParams);
+          p.set("view", "progress");
+          p.set("calDay", iso);
+          setSearchParams(p, { replace: true });
+        }} /> : <LoadingInline />)}
+        {calMode === "year" &&
+          (yearCal.data ? (
+            <div className="stats-grid compact">
+              {yearCal.data.months.map((m) => (
+                <button
+                  key={m.month}
+                  type="button"
+                  className="button ghost"
+                  onClick={() => {
+                    setCalendarDate(new Date(yearCal.data!.year, m.month - 1, 1));
+                    setCalMode("month");
+                  }}
+                >
+                  {new Date(yearCal.data!.year, m.month - 1, 1).toLocaleDateString(webLocale(server), { month: "short" })} · {m.plays} plays
+                </button>
+              ))}
+            </div>
+          ) : (
+            <LoadingInline />
+          ))}
+        {calMode === "week" && calendar.data && (
+          <div className="inline-meta">
+            Week strip uses the current month grid — select a day to switch to Day mode with plays for that date.
+          </div>
+        )}
+        {calMode === "day" && (
+          <div className="stack">
+            <label className="field inline-field">
+              <span>Day</span>
+              <input
+                type="date"
+                value={exploreDay || ""}
+                onChange={(event) => {
+                  const v = event.target.value;
+                  setExploreDay(v);
+                  const p = new URLSearchParams(searchParams);
+                  p.set("view", "progress");
+                  p.set("calDay", v);
+                  setSearchParams(p, { replace: true });
+                }}
+              />
+            </label>
+            {dayShots.data ? <ScreenshotGallery items={dayShots.data.items} server={server} /> : <LoadingInline />}
+          </div>
+        )}
       </Card>
       <Card title="Milestones">
         <div className="inline-meta">
@@ -1686,7 +1720,7 @@ function MilestonesAnalyticsView() {
         </div>
       </Card>
       <Card title="Milestone timeline">
-        {milestones.data ? <MilestoneTimeline items={milestones.data.milestones} /> : <LoadingInline />}
+        {milestones.data ? <MilestoneTimeline items={milestones.data.milestones} server={auth.user.server} /> : <LoadingInline />}
       </Card>
     </div>
   );
@@ -1697,26 +1731,94 @@ function SongsAnalyticsView() {
   const [filters, setFilters] = useState<SectionFilterState>({ difficulty: "", liveType: "", includeMeta: false });
   const [sortBy, setSortBy] = useState("play_count");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [results, setResults] = useState<Array<{ song_id: number; song_name: string }>>([]);
+  const [rows, setRows] = useState<SongRankingsResponse["items"]>([]);
+  const [totalRanked, setTotalRanked] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const filterQuery = sectionFiltersToQuery(filters);
-  const rankings = useLoadable<SongRankingsResponse>(
-    auth.user ? () => api.getSongRankings(auth.user!.id, { ...filterQuery, sort_by: sortBy, limit: 40 }) : null,
-    [auth.user?.id, sortBy, filters.difficulty, filters.liveType, filters.includeMeta],
-  );
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const pageSize = 50;
 
-  if (!auth.user) return null;
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
+    return () => window.clearTimeout(t);
+  }, [searchQuery]);
 
-  async function runSearch() {
-    if (!searchQuery.trim()) {
+  useEffect(() => {
+    if (!auth.user) return;
+    let cancelled = false;
+    setRows([]);
+    setTotalRanked(0);
+    void (async () => {
+      try {
+        const first = await api.getSongRankings(auth.user!.id, { ...filterQuery, sort_by: sortBy, limit: pageSize, offset: 0 });
+        if (cancelled) return;
+        setRows(first.items);
+        setTotalRanked(first.total);
+      } catch {
+        if (!cancelled) {
+          setRows([]);
+          setTotalRanked(0);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.user?.id, sortBy, filters.difficulty, filters.liveType, filters.includeMeta]);
+
+  const loadMore = useCallback(async () => {
+    if (!auth.user || loadingMore || rows.length >= totalRanked) return;
+    setLoadingMore(true);
+    try {
+      const next = await api.getSongRankings(auth.user.id, {
+        ...filterQuery,
+        sort_by: sortBy,
+        limit: pageSize,
+        offset: rows.length,
+      });
+      setRows((prev) => [...prev, ...next.items]);
+    } catch {
+      /* ignore */
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [auth.user, filterQuery, loadingMore, rows.length, sortBy, totalRanked]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting) void loadMore();
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [loadMore]);
+
+  useEffect(() => {
+    if (!auth.user || !debouncedSearch) {
       setResults([]);
       return;
     }
-    try {
-      const response = await api.searchSongs(auth.user!.id, searchQuery, auth.user!.server);
-      setResults(response.results);
-    } catch {
-      setResults([]);
-    }
+    let cancelled = false;
+    void api
+      .searchSongs(auth.user.id, debouncedSearch, auth.user.server)
+      .then((response) => {
+        if (!cancelled) setResults(response.results);
+      })
+      .catch(() => {
+        if (!cancelled) setResults([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSearch, auth.user]);
+
+  if (!auth.user) return null;
+
+  function toggleSort(key: string) {
+    setSortBy((prev) => (prev === key ? prev : key));
   }
 
   return (
@@ -1726,21 +1828,7 @@ function SongsAnalyticsView() {
           <div className="analytics-filter-row">
             <label className="field song-search-field">
               <span>Song search</span>
-              <div className="button-row tight">
-                <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search song names" />
-                <button className="button primary" type="button" onClick={() => void runSearch()}>
-                  Search
-                </button>
-              </div>
-            </label>
-            <label className="field inline-field">
-              <span>Sort songs by</span>
-              <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
-                <option value="play_count">Plays</option>
-                <option value="skill_score">Skill score</option>
-                <option value="fc_count">FC count</option>
-                <option value="ap_count">AP count</option>
-              </select>
+              <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search song names" />
             </label>
             <SectionFilterControls filters={filters} onChange={setFilters} />
           </div>
@@ -1756,71 +1844,15 @@ function SongsAnalyticsView() {
         </div>
       </Card>
       <Card title="Song rankings">
-        {rankings.data ? <SongRankingsTable data={rankings.data} /> : <LoadingInline />}
-      </Card>
-    </div>
-  );
-}
-
-function EventsAnalyticsView() {
-  const auth = useAuth();
-  const [selectedEventId, setSelectedEventId] = useState("");
-  const [filters, setFilters] = useState<SectionFilterState>({ difficulty: "", liveType: "", includeMeta: false });
-  const events = useLoadable(auth.user ? () => api.getReferenceEvents(1200) : null, [auth.user?.id]);
-  const filterQuery = sectionFiltersToQuery(filters);
-  const eventStats = useLoadable<EventStatsResponse>(
-    auth.user && selectedEventId ? () => api.getEventStats(auth.user!.id, Number(selectedEventId), filterQuery) : null,
-    [auth.user?.id, selectedEventId, filters.difficulty, filters.liveType, filters.includeMeta],
-  );
-  const recap = useLoadable<RecapResponse>(
-    auth.user && selectedEventId ? () => api.getRecap(auth.user!.id, "event", Number(selectedEventId), undefined, filterQuery) : null,
-    [auth.user?.id, selectedEventId, filters.difficulty, filters.liveType, filters.includeMeta],
-  );
-
-  if (!auth.user) return null;
-  const recentEvents = ((events.data?.items || []) as Array<Record<string, unknown>>)
-    .slice()
-    .filter((event) => Number.isFinite(Number(event.event_id)) && Number(event.event_id) > 0)
-    .sort((a, b) => Number(b.event_id || 0) - Number(a.event_id || 0))
-    .slice(0, 48);
-
-  return (
-    <div className="page-grid">
-      <Card title="Event controls">
-        <div className="analytics-filter-row">
-          <label className="field">
-            <span>Event</span>
-            <select value={selectedEventId} onChange={(event) => setSelectedEventId(event.target.value)}>
-              <option value="">Select event</option>
-              {recentEvents.map((event) => (
-                <option key={String(event.event_id)} value={String(event.event_id)}>
-                  {formatEventLabel(event, auth.user!.server)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <SectionFilterControls filters={filters} onChange={setFilters} />
-        </div>
-      </Card>
-      <Card title="Event analysis">
-        {!selectedEventId ? (
-          <EmptyState text="Pick one event and this page will stay entirely event-focused." />
-        ) : eventStats.loading ? (
-          <LoadingInline />
-        ) : eventStats.error ? (
-          <div className="stack">
-            <EmptyState text={`Could not load event analysis: ${eventStats.error}`} />
-            <div className="button-row tight">
-              <button className="button" type="button" onClick={() => void eventStats.reload()}>
-                Retry
-              </button>
-            </div>
-          </div>
-        ) : eventStats.data ? (
-          <EventFocusPanel stats={eventStats.data} recap={recap.data} />
-        ) : (
-          <EmptyState text="No event data returned for this selection." />
-        )}
+        <SongRankingsTable
+          items={rows}
+          sortBy={sortBy}
+          onSort={toggleSort}
+          total={totalRanked}
+          server={auth.user.server}
+        />
+        <div ref={sentinelRef} style={{ height: 1 }} />
+        {loadingMore && <LoadingInline />}
       </Card>
     </div>
   );
@@ -1828,31 +1860,62 @@ function EventsAnalyticsView() {
 
 function RecapAnalyticsView() {
   const auth = useAuth();
-  const [scope, setScope] = useState<RecapScope>("monthly");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const readScope = (value: string | null): RecapScope => {
+    if (value === "weekly" || value === "monthly" || value === "seasonal" || value === "yearly" || value === "event") return value;
+    return "monthly";
+  };
+  const [scope, setScope] = useState<RecapScope>(() => readScope(searchParams.get("scope")));
   const [anchorDate, setAnchorDate] = useState(() => new Date());
   const [selectedEventId, setSelectedEventId] = useState("");
+  const [eventSearch, setEventSearch] = useState("");
   const [filters, setFilters] = useState<SectionFilterState>({ difficulty: "", liveType: "", includeMeta: false });
   const events = useLoadable(auth.user ? () => api.getReferenceEvents(1200) : null, [auth.user?.id]);
   const filterQuery = sectionFiltersToQuery(filters);
-  const recap = useLoadable<RecapResponse>(
-    auth.user && (scope !== "event" || Boolean(selectedEventId))
-      ? () =>
-          api.getRecap(
-            auth.user!.id,
-            scope,
-            scope === "event" ? Number(selectedEventId) : undefined,
-            scope === "event" ? undefined : anchorDate.toISOString().slice(0, 10),
-            filterQuery,
-          )
+
+  useEffect(() => {
+    setScope(readScope(searchParams.get("scope")));
+  }, [searchParams]);
+
+  const recapGeneral = useLoadable<RecapResponse>(
+    auth.user && scope !== "event"
+      ? () => api.getRecap(auth.user!.id, scope, undefined, anchorDate.toISOString().slice(0, 10), filterQuery)
       : null,
-    [auth.user?.id, scope, selectedEventId, anchorDate.getFullYear(), anchorDate.getMonth(), filters.difficulty, filters.liveType, filters.includeMeta],
+    [auth.user?.id, scope, anchorDate.getTime(), filters.difficulty, filters.liveType, filters.includeMeta],
+  );
+
+  const recapEvent = useLoadable<RecapResponse>(
+    auth.user && scope === "event" && Boolean(selectedEventId)
+      ? () => api.getRecap(auth.user!.id, "event", Number(selectedEventId), undefined, filterQuery)
+      : null,
+    [auth.user?.id, scope, selectedEventId, filters.difficulty, filters.liveType, filters.includeMeta],
+  );
+
+  const eventStats = useLoadable<EventStatsResponse>(
+    auth.user && scope === "event" && Boolean(selectedEventId)
+      ? () => api.getEventStats(auth.user!.id, Number(selectedEventId), filterQuery)
+      : null,
+    [auth.user?.id, scope, selectedEventId, filters.difficulty, filters.liveType, filters.includeMeta],
   );
 
   if (!auth.user) return null;
+  const server = auth.user.server;
   const recentEvents = ((events.data?.items || []) as Array<Record<string, unknown>>)
     .slice()
-    .sort((a, b) => Number(b.event_id || b.id || 0) - Number(a.event_id || a.id || 0))
-    .slice(0, 48);
+    .filter((event) => Number.isFinite(Number(event.event_id || event.id)) && Number(event.event_id || event.id) > 0)
+    .sort((a, b) => Number(b.event_id || b.id || 0) - Number(a.event_id || a.id || 0));
+  const q = eventSearch.trim().toLowerCase();
+  const filteredEvents = q
+    ? recentEvents.filter((event) => formatEventLabelDateOnly(event, server).toLowerCase().includes(q))
+    : recentEvents;
+
+  function updateScope(next: RecapScope) {
+    setScope(next);
+    const p = new URLSearchParams(searchParams);
+    p.set("view", "recap");
+    p.set("scope", next);
+    setSearchParams(p, { replace: true });
+  }
 
   return (
     <div className="page-grid">
@@ -1860,8 +1923,13 @@ function RecapAnalyticsView() {
         <div className="analytics-filter-row">
           <label className="field inline-field">
             <span>Scope</span>
-            <select value={scope} onChange={(event) => setScope(event.target.value as RecapScope)}>
-              {["weekly", "monthly", "seasonal", "yearly", "event"].map((value) => (
+            <select
+              value={scope}
+              onChange={(event) => {
+                updateScope(event.target.value as RecapScope);
+              }}
+            >
+              {(["weekly", "monthly", "seasonal", "yearly", "event"] as const).map((value) => (
                 <option key={value} value={value}>
                   {formatDifficulty(value)}
                 </option>
@@ -1869,26 +1937,38 @@ function RecapAnalyticsView() {
             </select>
           </label>
           {scope === "event" ? (
-            <label className="field">
-              <span>Event</span>
-              <select value={selectedEventId} onChange={(event) => setSelectedEventId(event.target.value)}>
-                <option value="">Select event</option>
-                {recentEvents.map((event) => (
-                  <option key={String(event.event_id || event.id)} value={String(event.event_id || event.id)}>
-                    {formatEventLabel(event, auth.user!.server)}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <>
+              <label className="field">
+                <span>Search events</span>
+                <input value={eventSearch} onChange={(e) => setEventSearch(e.target.value)} placeholder="Filter by name or date" />
+              </label>
+              <label className="field">
+                <span>Event</span>
+                <select value={selectedEventId} onChange={(event) => setSelectedEventId(event.target.value)}>
+                  <option value="">Select event</option>
+                  {filteredEvents.slice(0, 200).map((event) => (
+                    <option key={String(event.event_id || event.id)} value={String(event.event_id || event.id)}>
+                      {formatEventLabelDateOnly(event, server)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
           ) : (
             <div className="button-row tight analytics-month-nav">
-              <button className="button ghost" type="button" onClick={() => setAnchorDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}>
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => setAnchorDate((prev) => stepRecapAnchor(scope, prev, -1))}
+              >
                 Prev
               </button>
-              <div className="toolbar-chip">
-                {anchorDate.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
-              </div>
-              <button className="button ghost" type="button" onClick={() => setAnchorDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}>
+              <div className="toolbar-chip">{recapNavLabel(scope, anchorDate, server)}</div>
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => setAnchorDate((prev) => stepRecapAnchor(scope, prev, 1))}
+              >
                 Next
               </button>
             </div>
@@ -1899,8 +1979,25 @@ function RecapAnalyticsView() {
       <Card title="Recap">
         {scope === "event" && !selectedEventId ? (
           <EmptyState text="Pick an event to build an event recap." />
-        ) : recap.data ? (
-          <RecapPanel data={recap.data} />
+        ) : scope === "event" ? (
+          eventStats.loading || recapEvent.loading ? (
+            <LoadingInline />
+          ) : eventStats.error ? (
+            <div className="stack">
+              <EmptyState text={`Could not load event analysis: ${eventStats.error}`} />
+              <div className="button-row tight">
+                <button className="button" type="button" onClick={() => void eventStats.reload()}>
+                  Retry
+                </button>
+              </div>
+            </div>
+          ) : eventStats.data ? (
+            <EventFocusPanel stats={eventStats.data} recap={recapEvent.data} />
+          ) : (
+            <EmptyState text="No event data returned for this selection." />
+          )
+        ) : recapGeneral.data ? (
+          <RecapPanel data={recapGeneral.data} server={server} scope={scope} />
         ) : (
           <LoadingInline />
         )}
@@ -2054,7 +2151,7 @@ function ScreenshotsAnalyticsView() {
             <div className="inline-meta">
               Showing {screenshots.data.offset + 1}-{Math.min(screenshots.data.offset + screenshots.data.items.length, screenshots.data.total)} of {screenshots.data.total}
             </div>
-            <ScreenshotGallery items={screenshots.data.items} />
+            <ScreenshotGallery items={screenshots.data.items} server={auth.user.server} />
             <div className="button-row">
               <button className="button ghost" type="button" disabled={offset === 0} onClick={() => setOffset((current) => Math.max(0, current - 24))}>
                 Previous page
@@ -2096,6 +2193,7 @@ function SongStatsPage() {
   );
 
   if (!auth.user) return null;
+  const server = auth.user.server;
 
   return (
     <div className="page-grid">
@@ -2141,6 +2239,7 @@ function SongStatsPage() {
             <Card title="Milestone captures">
               {data.data.detail ? (
                 <MilestoneGallery
+                  server={server}
                   items={[
                     data.data.detail.first_played ? { label: "First play", meta: data.data.detail.first_played } : null,
                     data.data.detail.first_fc ? { label: "First FC", meta: data.data.detail.first_fc } : null,
@@ -2155,8 +2254,8 @@ function SongStatsPage() {
               {journey.data ? <JourneySummary data={journey.data} /> : <LoadingInline />}
             </Card>
           </div>
-          <Card title="Progression timeline">
-            {journey.data ? <TimelinePanel items={journey.data.timeline} /> : <LoadingInline />}
+          <Card title="Progression chain">
+            {journey.data ? <TimelinePanel items={journey.data.timeline} server={server} /> : <LoadingInline />}
           </Card>
         </div>
       )}
@@ -2404,31 +2503,6 @@ function AuthCard({
 
 // Remaining helper components (not yet extracted)
 
-function InsightsPanel({ data }: { data: InsightsResponse }) {
-  return (
-    <div className="stack">
-      <div className="inline-meta">{formatDateRange(data.from_date, data.to_date)}</div>
-      <KeyValueList
-        items={[
-          ["Observed plays", String(data.data_quality.observed_plays)],
-          ["Sessions", String(data.sessions.total_sessions)],
-          ["Avg session minutes", String(data.sessions.avg_session_minutes)],
-          ["Avg plays/session", String(data.sessions.avg_plays_per_session)],
-          ["Longest session", `${data.sessions.longest_session_minutes} min`],
-        ]}
-      />
-      <ul className="list">
-        {data.practice_periods.slice(0, 5).map((item) => (
-          <li key={`${item.song_id}-${item.latest_burst_at || "burst"}`}>
-            <strong>{item.song_name || `Song ${item.song_id}`}</strong>: {item.total_plays} plays, max burst {item.max_burst_plays}, {item.estimated_time_played_human}
-            {item.latest_burst_at && <span className="inline-meta"> · latest burst {formatDateTime(item.latest_burst_at)}</span>}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function SectionFilterControls({
   filters,
   onChange,
@@ -2492,45 +2566,101 @@ function ExclusionPill({
 
 function RecentPlayList({
   items,
+  server,
 }: {
   items: Array<{ song_id: number; song_name?: string | null; difficulty: string; timestamp?: string | null; filename?: string | null; live_type?: string | null; image_url?: string | null }>;
+  server: User["server"];
 }) {
+  const [active, setActive] = useState<number | null>(null);
   if (!items.length) return <EmptyState text="No recent plays found." />;
+  const modalItems: ScreenshotModalItem[] = items.map((item) => ({
+    song_id: item.song_id,
+    song_name: item.song_name,
+    difficulty: item.difficulty,
+    live_type: item.live_type || "",
+    timestamp: item.timestamp ?? null,
+    filename: item.filename ?? null,
+    image_url: item.image_url ?? null,
+    image_available: Boolean(item.image_url),
+    accuracy: 0,
+    score: 0,
+    full_combo: false,
+    all_perfect: false,
+    anomaly: false,
+  }));
   return (
-    <div className="list-grid">
-      {items.map((item, index) => (
-        <div key={`${item.song_id}-${item.timestamp || index}`} className="list-card">
-          <div>
-            <strong>{item.song_name || `Song #${item.song_id}`}</strong>
-            <div className="inline-meta">
-              {formatDifficulty(item.difficulty)} | {formatLiveType(item.live_type)}
-            </div>
+    <>
+      <div className="list-grid">
+        {items.map((item, index) => (
+          <div key={`${item.song_id}-${item.timestamp || index}`} className="list-card">
+            <CompactScreenshotCard
+              item={modalItems[index]!}
+              server={server}
+              onOpen={() => setActive(index)}
+              thumb={
+                item.image_url ? (
+                  <SecureImage path={item.image_url} alt={item.filename || `play-${index}`} className="compact-shot-thumb" />
+                ) : (
+                  <div className="gallery-placeholder compact-shot-thumb">No image</div>
+                )
+              }
+            />
+            <div className="inline-meta">{formatDateTime(item.timestamp, server)}</div>
           </div>
-          <div className="inline-meta">{formatDateTime(item.timestamp)}</div>
-          {item.image_url ? <SecureImage path={item.image_url} alt={item.filename || `play-${index}`} className="thumb-image" /> : <div className="gallery-placeholder thumb-image">No image</div>}
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+      {active != null && (
+        <ScreenshotModal items={modalItems} index={active} server={server} onClose={() => setActive(null)} onIndexChange={setActive} />
+      )}
+    </>
   );
 }
 
-function SongRankingsTable({ data }: { data: SongRankingsResponse }) {
-  if (!data.items.length) return <EmptyState text="No ranked songs found for the current filters." />;
+function SongRankingsTable({
+  items,
+  sortBy,
+  onSort,
+  total,
+  server,
+}: {
+  items: SongRankingsResponse["items"];
+  sortBy: string;
+  onSort: (key: string) => void;
+  total: number;
+  server: User["server"];
+}) {
+  if (!items.length) return <EmptyState text="No ranked songs found for the current filters." />;
   return (
     <div className="table-wrap">
       <table className="data-table">
         <thead>
           <tr>
             <th>Song</th>
-            <th>Plays</th>
-            <th>FC</th>
-            <th>AP</th>
-            <th>Skill</th>
+            <th>
+              <button type="button" className="th-sort" onClick={() => onSort("play_count")}>
+                Plays{sortBy === "play_count" ? " *" : ""}
+              </button>
+            </th>
+            <th>
+              <button type="button" className="th-sort" onClick={() => onSort("fc_count")}>
+                FC{sortBy === "fc_count" ? " *" : ""}
+              </button>
+            </th>
+            <th>
+              <button type="button" className="th-sort" onClick={() => onSort("ap_count")}>
+                AP{sortBy === "ap_count" ? " *" : ""}
+              </button>
+            </th>
+            <th>
+              <button type="button" className="th-sort" onClick={() => onSort("skill_score")}>
+                Skill{sortBy === "skill_score" ? " *" : ""}
+              </button>
+            </th>
             <th>Latest</th>
           </tr>
         </thead>
         <tbody>
-          {data.items.map((item) => (
+          {items.map((item) => (
             <tr key={item.song_id}>
               <td>
                 <Link to={`/stats/song/${item.song_id}`}>{item.song_name || `Song #${item.song_id}`}</Link>
@@ -2539,54 +2669,144 @@ function SongRankingsTable({ data }: { data: SongRankingsResponse }) {
               <td>{item.fc_count}</td>
               <td>{item.ap_count}</td>
               <td>{item.skill_score}</td>
-              <td>{formatShortDate(item.latest_play?.timestamp)}</td>
+              <td>{formatShortDate(item.latest_play?.timestamp, server)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      <div className="inline-meta">Loaded {items.length} of {total}</div>
     </div>
   );
 }
 
-function RecapPanel({ data }: { data: RecapResponse }) {
+function RecapPanel({ data, server, scope }: { data: RecapResponse; server: User["server"]; scope: RecapScope }) {
+  const digest = data.daily_digest ?? [];
+  const maxPlays = Math.max(1, ...digest.map((d) => d.plays));
+  const showSessionTable = scope === "weekly" || scope === "event";
+  const showHeatStrip = scope === "monthly" || scope === "seasonal" || scope === "yearly";
+  const [hlIndex, setHlIndex] = useState<number | null>(null);
+  const hlItems: ScreenshotModalItem[] = useMemo(
+    () =>
+      data.highlights
+        .filter((h) => h.screenshot?.image_url)
+        .map((h) => ({
+          song_name: h.value,
+          difficulty: "",
+          live_type: "",
+          timestamp: h.screenshot?.timestamp ?? null,
+          filename: h.screenshot?.filename ?? null,
+          image_url: h.screenshot?.image_url ?? null,
+          image_available: true,
+          accuracy: 0,
+          score: 0,
+          full_combo: false,
+          all_perfect: false,
+          anomaly: false,
+        })),
+    [data.highlights],
+  );
+
   return (
     <div className="stack">
-      <div className="inline-meta">{formatDateRange(data.from_date, data.to_date)}</div>
+      <div className="inline-meta">{formatDateRange(data.from_date, data.to_date, server)}</div>
       <div className="stats-grid compact">
         <MetricCard label="Scope" value={data.title} />
+        <MetricCard label="Total plays" value={data.summary.total_plays ?? 0} />
         <MetricCard label="Skill score" value={data.skill_score} />
         <MetricCard label="Delta" value={data.skill_score_delta} />
         <MetricCard label="Sessions" value={data.sessions.total_sessions || 0} />
       </div>
+      {showSessionTable && digest.length > 0 && (
+        <div className="stack">
+          <div className="subheading">Daily sessions & plays</div>
+          <div className="table-wrap">
+            <table className="data-table recap-daily-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Plays</th>
+                  <th>FC</th>
+                  <th>AP</th>
+                  <th>Sessions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {digest.map((row) => (
+                  <tr key={row.date}>
+                    <td>{formatShortDate(row.date, server)}</td>
+                    <td>{row.plays}</td>
+                    <td>{row.fc}</td>
+                    <td>{row.ap}</td>
+                    <td>{row.sessions}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {showHeatStrip && digest.length > 0 && (
+        <div className="stack">
+          <div className="subheading">Activity heatmap (click opens Progress for that day)</div>
+          <div className="recap-heatmap-mini">
+            {digest.map((row) => {
+              const intensity = row.plays / maxPlays;
+              const alpha = 0.15 + intensity * 0.85;
+              return (
+                <Link
+                  key={row.date}
+                  to={`/stats?view=progress&calDay=${row.date}`}
+                  title={`${row.date}: ${row.plays} plays`}
+                  style={{ background: `rgba(124, 92, 255, ${alpha})` }}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="card-grid recap-grid">
-        {data.highlights.map((item) => (
-          <div className="highlight-card" key={item.title}>
+        {data.highlights.map((item, idx) => (
+          <button
+            type="button"
+            className="highlight-card interactive"
+            key={item.title}
+            onClick={() => {
+              if (!item.screenshot?.image_url) return;
+              const i = data.highlights.filter((h) => h.screenshot?.image_url).findIndex((h) => h.title === item.title);
+              setHlIndex(i >= 0 ? i : null);
+            }}
+          >
             <span className="brand-kicker">{item.title}</span>
             <strong>{item.value}</strong>
             <p>{item.detail}</p>
-            {item.screenshot?.image_url && <SecureImage path={item.screenshot.image_url} alt={item.screenshot.filename || item.title} className="highlight-image" />}
-          </div>
+            {item.screenshot?.image_url && (
+              <SecureImage path={item.screenshot.image_url} alt={item.screenshot.filename || item.title} className="highlight-image" />
+            )}
+          </button>
         ))}
       </div>
+      {hlIndex != null && hlItems.length > 0 && (
+        <ScreenshotModal
+          items={hlItems}
+          index={hlIndex}
+          server={server}
+          onClose={() => setHlIndex(null)}
+          onIndexChange={setHlIndex}
+        />
+      )}
       <div className="layout-two">
         <div>
           <div className="subheading">Top songs</div>
           <BarChart items={data.top_songs.map((item) => ({ label: item.song_name || `#${item.song_id}`, value: item.play_count }))} />
         </div>
         <div>
-          <div className="subheading">Most practiced</div>
-          <BarChart items={data.most_practiced.map((item) => ({ label: item.song_name || `#${item.song_id}`, value: item.play_count }))} />
-        </div>
-      </div>
-      <div className="layout-two">
-        <div>
           <div className="subheading">Live types</div>
           <BarChart items={Object.entries(data.live_types).map(([label, value]) => ({ label: formatLiveType(label), value }))} />
         </div>
-        <div>
-          <div className="subheading">Active hours</div>
-          <BarChart items={groupActiveHours(data.active_hours)} />
-        </div>
+      </div>
+      <div>
+        <div className="subheading">Active hours</div>
+        <BarChart items={groupActiveHours(data.active_hours)} />
       </div>
     </div>
   );
@@ -2689,8 +2909,10 @@ function CurrentEventCard({
 
 function MilestoneTimeline({
   items,
+  server,
 }: {
   items: MilestonesResponse["milestones"];
+  server: User["server"];
 }) {
   if (!items.length) return <EmptyState text="No milestones yet." />;
   return (
@@ -2707,7 +2929,7 @@ function MilestoneTimeline({
             <div className="stack">
               <strong>{item.label}</strong>
               <div className="inline-meta">Play #{item.play_count}</div>
-              <div className="inline-meta">{formatDateTime(item.meta?.timestamp)}</div>
+              <div className="inline-meta">{formatDateTime(item.meta?.timestamp, server)}</div>
             </div>
           </div>
         </div>
@@ -2718,8 +2940,10 @@ function MilestoneTimeline({
 
 function MilestoneGallery({
   items,
+  server,
 }: {
   items: Array<{ label: string; meta: { timestamp?: string | null; filename?: string | null; image_url?: string | null } }>;
+  server: User["server"];
 }) {
   if (!items.length) return <EmptyState text="No milestone images available." />;
   return (
@@ -2729,7 +2953,7 @@ function MilestoneGallery({
           {item.meta.image_url ? <SecureImage path={item.meta.image_url} alt={item.meta.filename || item.label} className="gallery-image" /> : <div className="gallery-placeholder">No image</div>}
           <div className="gallery-meta">
             <strong>{item.label}</strong>
-            <span>{item.meta.timestamp ? new Date(item.meta.timestamp).toLocaleString() : "Unknown date"}</span>
+            <span>{item.meta.timestamp ? formatDateTime(item.meta.timestamp, server) : "Unknown date"}</span>
           </div>
         </div>
       ))}
@@ -2746,7 +2970,6 @@ function JourneySummary({ data }: { data: SongJourneyResponse }) {
         ["Skill score", String(data.skill_score)],
         ["Plays before FC", data.plays_before_fc == null ? "Not found" : String(data.plays_before_fc)],
         ["Plays before AP", data.plays_before_ap == null ? "Not found" : String(data.plays_before_ap)],
-        ["Practice windows", String(data.practice_periods.length)],
       ]}
     />
   );
@@ -2754,24 +2977,58 @@ function JourneySummary({ data }: { data: SongJourneyResponse }) {
 
 function TimelinePanel({
   items,
+  server,
 }: {
   items: Array<{ type: string; label: string; timestamp?: string | null; filename?: string | null; image_url?: string | null; details: Record<string, unknown> }>;
+  server: User["server"];
 }) {
+  const [active, setActive] = useState(0);
+  const [modalOpen, setModalOpen] = useState(false);
   if (!items.length) return <EmptyState text="No timeline items found." />;
+  const modalItems: ScreenshotModalItem[] = items.map((item) => ({
+    song_name: item.label,
+    difficulty: "",
+    live_type: "",
+    timestamp: item.timestamp ?? null,
+    filename: item.filename ?? null,
+    image_url: item.image_url ?? null,
+    image_available: Boolean(item.image_url),
+    accuracy: typeof item.details?.accuracy === "number" ? (item.details.accuracy as number) : 0,
+    score: 0,
+    full_combo: false,
+    all_perfect: false,
+    anomaly: false,
+  }));
   return (
-    <div className="timeline">
-      {items.map((item, index) => (
-        <div className="timeline-item" key={`${item.type}-${item.timestamp || index}`}>
-          <div className="timeline-marker" />
-          <div className="timeline-content">
+    <>
+      <div className="journey-chain">
+        {items.map((item, index) => (
+          <button
+            type="button"
+            key={`${item.type}-${item.timestamp || index}`}
+            className="journey-node"
+            onClick={() => {
+              setActive(index);
+              if (item.image_url) setModalOpen(true);
+            }}
+          >
+            <div className="journey-node__rail">
+              <div className="journey-node__dot" />
+              {index < items.length - 1 ? <div className="journey-node__line" /> : null}
+            </div>
             <strong>{item.label}</strong>
-            <div className="inline-meta">{item.timestamp ? new Date(item.timestamp).toLocaleString() : "No timestamp"}</div>
-            {item.image_url && <SecureImage path={item.image_url} alt={item.filename || item.label} className="thumb-image" />}
-            {!!Object.keys(item.details || {}).length && <CodeBlock value={item.details} />}
-          </div>
-        </div>
-      ))}
-    </div>
+            <div className="inline-meta">{item.timestamp ? formatDateTime(item.timestamp, server) : "No timestamp"}</div>
+            {typeof item.details?.accuracy === "number" ? (
+              <div className="inline-meta">Accuracy {String(item.details.accuracy)}%</div>
+            ) : null}
+            {item.image_url ? <SecureImage path={item.image_url} alt={item.filename || item.label} className="thumb-image" /> : null}
+          </button>
+        ))}
+      </div>
+      {modalOpen && modalItems[active]?.image_url ? (
+        <ScreenshotModal items={modalItems} index={active} server={server} onClose={() => setModalOpen(false)} onIndexChange={setActive} />
+      ) : null}
+    </>
   );
 }
 

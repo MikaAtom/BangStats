@@ -5,19 +5,22 @@ interface SecureImageProps {
   path: string;
   alt: string;
   className?: string;
+  /** Load immediately (modal hero, above-the-fold). */
+  priority?: boolean;
 }
 
-export function SecureImage({ path, alt, className }: SecureImageProps) {
+export function SecureImage({ path, alt, className, priority }: SecureImageProps) {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const [shouldLoad, setShouldLoad] = useState(false);
+  const [shouldLoad, setShouldLoad] = useState(Boolean(priority));
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setShouldLoad(false);
-  }, [path]);
+    setShouldLoad(Boolean(priority));
+  }, [path, priority]);
 
   useEffect(() => {
+    if (priority) return;
     const element = containerRef.current;
     if (!element) return;
 
@@ -38,7 +41,7 @@ export function SecureImage({ path, alt, className }: SecureImageProps) {
 
     observer.observe(element);
     return () => observer.disconnect();
-  }, [path]);
+  }, [path, priority]);
 
   useEffect(() => {
     if (!shouldLoad) return;
@@ -70,5 +73,13 @@ export function SecureImage({ path, alt, className }: SecureImageProps) {
       </div>
     );
   }
-  return <img className={className} src={src} alt={alt} loading="lazy" />;
+  return (
+    <img
+      className={className}
+      src={src}
+      alt={alt}
+      loading={priority ? "eager" : "lazy"}
+      decoding="async"
+    />
+  );
 }

@@ -1,5 +1,18 @@
 import type { User } from "../api";
 
+const SERVER_LOCALE: Record<User["server"], string> = {
+  en: "en-GB",
+  jp: "ja-JP",
+  tw: "zh-TW",
+  cn: "zh-CN",
+  kr: "ko-KR",
+};
+
+/** Use for all `Intl` formatting so UI matches the user's game server choice. */
+export function webLocale(server: User["server"]) {
+  return SERVER_LOCALE[server] || "en-GB";
+}
+
 function titleCase(value: string) {
   return value
     .replace(/_/g, " ")
@@ -36,22 +49,26 @@ export function formatDifficulty(value: string | null | undefined) {
   return titleCase(value);
 }
 
-export function formatShortDate(value: string | null | undefined) {
+export function formatShortDate(value: string | null | undefined, server: User["server"] = "en") {
   if (!value) return "Not found in repo";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return parsed.toLocaleDateString(webLocale(server), { year: "numeric", month: "short", day: "numeric" });
 }
 
-export function formatDateTime(value: string | null | undefined) {
+export function formatDateTime(value: string | null | undefined, server: User["server"] = "en") {
   if (!value) return "Not found in repo";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return parsed.toLocaleString(webLocale(server), { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-export function formatDateRange(fromDate: string | null | undefined, toDate: string | null | undefined) {
-  return `${formatShortDate(fromDate)} -> ${formatShortDate(toDate)}`;
+export function formatDateRange(
+  fromDate: string | null | undefined,
+  toDate: string | null | undefined,
+  server: User["server"] = "en",
+) {
+  return `${formatShortDate(fromDate, server)} -> ${formatShortDate(toDate, server)}`;
 }
 
 export function formatEventLabel(event: Record<string, unknown>, server: User["server"]) {
@@ -72,6 +89,34 @@ export function formatEventLabel(event: Record<string, unknown>, server: User["s
   return name;
 }
 
+/** Date-only boundaries for recap/event picker (no time-of-day). */
+export function formatEventDateOnlyBoundary(value: unknown, server: User["server"]) {
+  const timestampMs = coerceTimestampMs(value, server);
+  if (timestampMs == null) return "Not found in repo";
+  return new Date(timestampMs).toLocaleDateString(webLocale(server), {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+export function formatEventLabelDateOnly(event: Record<string, unknown>, server: User["server"]) {
+  const rawName = event.event_name;
+  let name = `Event #${String(event.id || event.event_id || "")}`;
+  if (rawName && typeof rawName === "object") {
+    const map = rawName as Record<string, string>;
+    name = map[server] || map.en || Object.values(map)[0] || name;
+  } else if (typeof rawName === "string" && rawName.trim()) {
+    name = rawName;
+  }
+  const start = formatEventDateOnlyBoundary(event.event_start_at, server);
+  const end = formatEventDateOnlyBoundary(event.event_end_at, server);
+  if (start !== "Not found in repo" && end !== "Not found in repo") {
+    return `${name} · ${start} – ${end}`;
+  }
+  return name;
+}
+
 export function resolveEventName(event: Record<string, unknown> | null | undefined, server: User["server"]) {
   if (!event) return "No current event";
   return formatEventLabel(event, server).split(" · ")[0];
@@ -80,7 +125,7 @@ export function resolveEventName(event: Record<string, unknown> | null | undefin
 export function formatEventBoundary(value: unknown, server: User["server"]) {
   const timestampMs = coerceTimestampMs(value, server);
   if (timestampMs == null) return "Not found in repo";
-  return new Date(timestampMs).toLocaleString(undefined, {
+  return new Date(timestampMs).toLocaleString(webLocale(server), {
     year: "numeric",
     month: "short",
     day: "numeric",

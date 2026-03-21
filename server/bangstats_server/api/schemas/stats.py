@@ -37,6 +37,9 @@ class SongRankingsResponse(BaseModel):
     difficulty: Optional[str] = None
     live_type: Optional[str] = None
     items: List[SongRankingItem] = Field(default_factory=list)
+    total: int = 0
+    offset: int = 0
+    limit: int = 0
     exclusion_context: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -131,6 +134,19 @@ class StatsCalendarResponse(BaseModel):
     month: int
     total_days_with_plays: int
     days: List[CalendarDayStats] = Field(default_factory=list)
+
+
+class CalendarMonthSummary(BaseModel):
+    month: int
+    plays: int = 0
+    fc: int = 0
+    ap: int = 0
+    active_days: int = 0
+
+
+class StatsCalendarYearResponse(BaseModel):
+    year: int
+    months: List[CalendarMonthSummary] = Field(default_factory=list)
 
 
 class SessionInsightSummary(BaseModel):
@@ -271,7 +287,6 @@ class SongJourneyResponse(BaseModel):
     plays_before_fc: Optional[int] = None
     plays_before_ap: Optional[int] = None
     skill_score: float = 0.0
-    practice_periods: List[Dict[str, Any]] = Field(default_factory=list)
     timeline: List[TimelinePoint] = Field(default_factory=list)
     exclusion_context: Dict[str, Any] = Field(default_factory=dict)
 
@@ -293,6 +308,15 @@ class RecapSongItem(BaseModel):
     latest_play: Optional[PlayMeta] = None
 
 
+class RecapDailyRow(BaseModel):
+    date: str
+    plays: int = 0
+    fc: int = 0
+    ap: int = 0
+    accuracy: float = 0.0
+    sessions: int = 0
+
+
 class RecapResponse(BaseModel):
     scope: str
     title: str
@@ -309,6 +333,7 @@ class RecapResponse(BaseModel):
     live_types: Dict[str, int] = Field(default_factory=dict)
     active_hours: Dict[str, int] = Field(default_factory=dict)
     highlights: List[RecapHighlight] = Field(default_factory=list)
+    daily_digest: List[RecapDailyRow] = Field(default_factory=list)
     streaks: Dict[str, int] = Field(default_factory=dict)
     sessions: Dict[str, Any] = Field(default_factory=dict)
     exclusion_context: Dict[str, Any] = Field(default_factory=dict)

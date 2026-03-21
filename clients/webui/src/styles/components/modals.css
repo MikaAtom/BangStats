@@ -23,6 +23,10 @@
   overflow-y: auto;
 }
 
+.modal-wide {
+  width: min(1100px, 100%);
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -32,7 +36,8 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.modal-header h2 {
+.modal-header h2,
+.modal-header h3 {
   margin: 0;
 }
 

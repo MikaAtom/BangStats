@@ -168,3 +168,21 @@
 .data-table tbody tr:hover {
   background: var(--bg-tertiary);
 }
+
+.data-table .th-sort {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.data-table td:nth-child(n + 2) {
+  text-align: right;
+}

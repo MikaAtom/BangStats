@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 from bangstats_server.core.services.stats import (
@@ -10,6 +10,9 @@ from bangstats_server.core.services.stats import (
     compute_insights,
     compute_milestones,
     compute_recent_plays,
+    compute_calendar_year_view,
+    compute_recap,
+    compute_song_journey,
     compute_song_rankings,
     compute_song_difficulty_overview,
     compute_top_songs,
@@ -238,15 +241,27 @@ def test_compute_song_rankings_and_stat_filters():
     assert len(filtered) == 2
     assert all(play.song_id == 1 for play in filtered)
 
-    rankings = compute_song_rankings(
+    rankings, total = compute_song_rankings(
         plays,
         song_names={1: "Song A", 2: "Song B"},
         sort_by="skill_score",
         limit=5,
     )
+    assert total == 2
     assert rankings[0]["song_name"] == "Song A"
     assert rankings[0]["play_count"] == 2
     assert rankings[0]["latest_play"]["filename"] == "b.png"
+
+    page, total2 = compute_song_rankings(
+        plays,
+        song_names={1: "Song A", 2: "Song B"},
+        sort_by="skill_score",
+        limit=1,
+        offset=1,
+    )
+    assert total2 == 2
+    assert len(page) == 1
+    assert page[0]["song_id"] == 2
 
 
 def test_compute_active_hours_uses_numeric_hour_keys():
@@ -261,3 +276,46 @@ def test_compute_active_hours_uses_numeric_hour_keys():
     result = compute_active_hours(plays)
 
     assert result == {"0": 1, "8": 2, "19": 1}
+
+
+def test_compute_recap_fc_highlight_uses_latest_fc_play():
+    base = datetime(2026, 3, 10, 12, 0, 0)
+    plays = [
+        _play(song_id=1, difficulty="expert", timestamp=base, filename="nofc.png", full_combo=False),
+        _play(song_id=1, difficulty="expert", timestamp=base + timedelta(hours=1), filename="fc.png", full_combo=True),
+        _play(song_id=1, difficulty="expert", timestamp=base + timedelta(hours=2), filename="later.png", full_combo=False),
+    ]
+    fr = date(2026, 3, 10)
+    to = date(2026, 3, 10)
+    payload = compute_recap(plays, scope="weekly", from_date=fr, to_date=to, song_names={1: "S1"})
+    fc_h = next(h for h in payload["highlights"] if h["title"] == "Full Combo push")
+    assert fc_h["screenshot"]["filename"] == "fc.png"
+    assert len(payload["daily_digest"]) == 1
+    assert payload["daily_digest"][0]["plays"] == 3
+
+
+def test_compute_song_journey_has_no_practice_period_type():
+    base = datetime(2026, 3, 1, 12, 0, 0)
+    plays = [
+        _play(
+            song_id=1,
+            difficulty="expert",
+            timestamp=base + timedelta(hours=i),
+            filename=f"{i}.png",
+            full_combo=(i >= 4),
+        )
+        for i in range(5)
+    ]
+    out = compute_song_journey(plays, song_id=1, song_name="S", difficulty="expert")
+    assert "practice_periods" not in out
+    assert all(t["type"] != "practice_period" for t in out["timeline"])
+    assert any(t["type"] == "first_fc" for t in out["timeline"])
+
+
+def test_compute_calendar_year_view_month_buckets():
+    base = datetime(2026, 6, 15, 12, 0, 0)
+    plays = [_play(song_id=1, difficulty="expert", timestamp=base, full_combo=True)]
+    res = compute_calendar_year_view(plays, year=2026)
+    assert res["year"] == 2026
+    assert res["months"][5]["month"] == 6
+    assert res["months"][5]["plays"] == 1

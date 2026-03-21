@@ -2,9 +2,10 @@ import type { CalendarResponse } from "../../api";
 
 interface CalendarHeatmapProps {
   data: CalendarResponse;
+  onDayClick?: (isoDate: string) => void;
 }
 
-export function CalendarHeatmap({ data }: CalendarHeatmapProps) {
+export function CalendarHeatmap({ data, onDayClick }: CalendarHeatmapProps) {
   const maxPlays = Math.max(...data.days.map((item) => item.plays), 1);
   const map = new Map(data.days.map((item) => [item.date, item]));
   const daysInMonth = new Date(data.year, data.month, 0).getDate();
@@ -17,17 +18,29 @@ export function CalendarHeatmap({ data }: CalendarHeatmapProps) {
   });
   return (
     <div className="calendar-grid">
-      {cells.map((cell) => (
-        <div
-          key={cell.day}
-          className="calendar-cell"
-          style={{ opacity: cell.intensity || 0.08 }}
-          title={cell.item ? `${cell.item.date}: ${cell.item.plays} plays` : `Day ${cell.day}`}
-        >
-          <span>{cell.day}</span>
-          <strong>{cell.item?.plays || 0}</strong>
-        </div>
-      ))}
+      {cells.map((cell) => {
+        const date = `${data.year}-${String(data.month).padStart(2, "0")}-${String(cell.day).padStart(2, "0")}`;
+        return (
+          <div
+            key={cell.day}
+            role={onDayClick ? "button" : undefined}
+            tabIndex={onDayClick ? 0 : undefined}
+            className={`calendar-cell${onDayClick ? " interactive" : ""}`}
+            style={{ opacity: cell.intensity || 0.08 }}
+            title={cell.item ? `${cell.item.date}: ${cell.item.plays} plays` : `Day ${cell.day}`}
+            onClick={() => onDayClick?.(date)}
+            onKeyDown={(event) => {
+              if (onDayClick && (event.key === "Enter" || event.key === " ")) {
+                event.preventDefault();
+                onDayClick(date);
+              }
+            }}
+          >
+            <span>{cell.day}</span>
+            <strong>{cell.item?.plays || 0}</strong>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -374,7 +374,6 @@ export type SongJourneyResponse = {
   plays_before_fc?: number | null;
   plays_before_ap?: number | null;
   skill_score: number;
-  practice_periods: Array<Record<string, unknown>>;
   timeline: Array<{
     type: string;
     label: string;
@@ -436,6 +435,14 @@ export type RecapResponse = {
     detail: string;
     screenshot?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
   }>;
+  daily_digest?: Array<{
+    date: string;
+    plays: number;
+    fc: number;
+    ap: number;
+    accuracy: number;
+    sessions: number;
+  }>;
   streaks: Record<string, number>;
   sessions: Record<string, number>;
   exclusion_context: {
@@ -450,6 +457,9 @@ export type SongRankingsResponse = {
   sort_by: string;
   difficulty?: string | null;
   live_type?: string | null;
+  total: number;
+  offset: number;
+  limit: number;
   items: Array<{
     song_id: number;
     song_name?: string | null;
@@ -465,6 +475,17 @@ export type SongRankingsResponse = {
     effective_song_ids: number[];
     is_active: boolean;
   };
+};
+
+export type CalendarYearResponse = {
+  year: number;
+  months: Array<{
+    month: number;
+    plays: number;
+    fc: number;
+    ap: number;
+    active_days: number;
+  }>;
 };
 
 export type MetaSongConfigResponse = {
@@ -509,6 +530,14 @@ export type ScreenshotItem = {
   timestamp: string;
   image_available: boolean;
   image_url?: string | null;
+  perfect?: number;
+  great?: number;
+  good?: number;
+  bad?: number;
+  miss?: number;
+  fast?: number;
+  slow?: number;
+  max_combo?: number;
 };
 
 export type ScreenshotListResponse = {
@@ -936,11 +965,12 @@ class ApiClient {
     return this.request<SongStatsResponse>(`/api/users/${userId}/stats/songs/${songId}${query}`);
   }
 
-  getSongRankings(userId: number, params: { sort_by?: string; limit?: number } & AnalyticsFilterQuery = {}) {
+  getSongRankings(userId: number, params: { sort_by?: string; limit?: number; offset?: number } & AnalyticsFilterQuery = {}) {
     const query = new URLSearchParams();
     appendAnalyticsFilters(query, params);
     if (params.sort_by) query.set("sort_by", params.sort_by);
-    if (params.limit) query.set("limit", String(params.limit));
+    if (params.limit != null) query.set("limit", String(params.limit));
+    if (params.offset != null && params.offset > 0) query.set("offset", String(params.offset));
     return this.request<SongRankingsResponse>(`/api/users/${userId}/stats/songs/rankings?${query.toString()}`);
   }
 
@@ -960,6 +990,12 @@ class ApiClient {
     const query = new URLSearchParams({ year: String(year), month: String(month) });
     appendAnalyticsFilters(query, filters);
     return this.request<CalendarResponse>(`/api/users/${userId}/stats/calendar?${query.toString()}`);
+  }
+
+  getCalendarYear(userId: number, year: number, filters: AnalyticsFilterQuery = {}) {
+    const query = new URLSearchParams({ year: String(year) });
+    appendAnalyticsFilters(query, filters);
+    return this.request<CalendarYearResponse>(`/api/users/${userId}/stats/calendar/year?${query.toString()}`);
   }
 
   getInsights(userId: number, filters: AnalyticsFilterQuery = { preset: "30d" }) {

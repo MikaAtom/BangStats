@@ -1,0 +1,220 @@
+.result-screen {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem 1rem;
+  font-size: 0.9rem;
+}
+
+.result-screen__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.result-screen__label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #888);
+}
+
+.result-screen__value {
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  .result-screen {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.screenshot-modal-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .screenshot-modal-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.screenshot-modal-layout .viewer-image {
+  width: 100%;
+  max-height: min(70vh, 640px);
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.compact-shot-card {
+  text-align: left;
+  border: 1px solid var(--border, #333);
+  border-radius: 10px;
+  padding: 0.65rem;
+  background: var(--card, #1a1a1c);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: start;
+  transition: border-color 0.15s ease;
+}
+
+.compact-shot-card--no-thumb {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.compact-shot-card__thumb .compact-shot-thumb,
+.compact-shot-card__thumb .image-fallback {
+  width: 88px;
+  height: 88px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.compact-shot-card__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.compact-shot-gallery .gallery-card.compact-shot-wrap {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.compact-shot-card:hover {
+  border-color: var(--accent, #7c5cff);
+}
+
+.compact-shot-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
+  font-size: 0.88rem;
+}
+
+.compact-shot-card__title {
+  font-weight: 700;
+  flex: 1 1 auto;
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.badge {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.badge.fc {
+  color: #9fdfff;
+}
+
+.badge.ap {
+  color: #ffd29f;
+}
+
+.badge.warn {
+  color: #ffb4b4;
+}
+
+.journey-chain {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding: 0.5rem 0;
+  scroll-snap-type: x mandatory;
+}
+
+.journey-node {
+  flex: 0 0 160px;
+  scroll-snap-align: start;
+  border: 1px solid var(--border, #333);
+  border-radius: 10px;
+  padding: 0.5rem;
+  background: var(--card, #1a1a1c);
+  cursor: pointer;
+  text-align: left;
+}
+
+.journey-node__rail {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.journey-node__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent, #7c5cff);
+}
+
+.journey-node__line {
+  flex: 1;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.recap-daily-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.recap-daily-table th,
+.recap-daily-table td {
+  padding: 0.35rem 0.5rem;
+  text-align: right;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.recap-daily-table th:first-child,
+.recap-daily-table td:first-child {
+  text-align: left;
+}
+
+.recap-heatmap-mini {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10px, 1fr));
+  gap: 3px;
+  max-height: 120px;
+  overflow: hidden;
+}
+
+.recap-heatmap-mini button {
+  aspect-ratio: 1;
+  border: none;
+  border-radius: 2px;
+  padding: 0;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.milestone-timeline .timeline-marker {
+  border-radius: 4px;
+  background: linear-gradient(145deg, rgba(124, 92, 255, 0.9), rgba(80, 200, 255, 0.65));
+}
+
+.highlight-card.interactive {
+  cursor: pointer;
+  border: 1px solid var(--border-subtle, #333);
+  background: var(--bg-tertiary, #222);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}

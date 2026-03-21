@@ -1,66 +1,55 @@
 import { useState } from "react";
-import type { ScreenshotItem } from "../../api";
+import type { ScreenshotItem, User } from "../../api";
 import { EmptyState } from "../ui/EmptyState";
 import { SecureImage } from "../ui/SecureImage";
-import { KeyValueList } from "../data-display/KeyValueList";
+import { CompactScreenshotCard, ScreenshotModal, type ScreenshotModalItem } from "../screenshots/ScreenshotModal";
 
 interface ScreenshotGalleryProps {
   items: ScreenshotItem[];
+  server: User["server"];
 }
 
-export function ScreenshotGallery({ items }: ScreenshotGalleryProps) {
-  const [active, setActive] = useState<ScreenshotItem | null>(null);
+function toModalItem(item: ScreenshotItem): ScreenshotModalItem {
+  return {
+    ...item,
+    image_available: item.image_available,
+  };
+}
+
+export function ScreenshotGallery({ items, server }: ScreenshotGalleryProps) {
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const modalItems: ScreenshotModalItem[] = items.map(toModalItem);
+
   if (!items.length) return <EmptyState text="No screenshots found." />;
+
   return (
     <>
-      <div className="gallery">
-        {items.map((item) => (
-          <button className="gallery-card interactive" key={item.id} onClick={() => setActive(item)}>
-            {item.image_available && item.image_url ? (
-              <SecureImage path={item.image_url} alt={item.filename || `screenshot-${item.id}`} className="gallery-image" />
-            ) : (
-              <div className="gallery-placeholder">No image</div>
-            )}
-            <div className="gallery-meta">
-              <strong>{item.song_name || `Song ${item.song_id}`}</strong>
-              <span>
-                {item.difficulty} | {item.live_type}
-              </span>
-              <span>
-                {new Date(item.timestamp).toLocaleString()} | {item.accuracy}% acc
-              </span>
-              <small>
-                Score {item.score.toLocaleString()}
-              </small>
-            </div>
-          </button>
-        ))}
-      </div>
-      {active && (
-        <div className="modal-backdrop" onClick={() => setActive(null)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <div className="card-header">
-              <h3>{active.song_name || `Song ${active.song_id}`}</h3>
-              <button className="button ghost" onClick={() => setActive(null)}>
-                Close
-              </button>
-            </div>
-            {active.image_available && active.image_url ? (
-              <SecureImage path={active.image_url} alt={active.filename || ""} className="viewer-image" />
-            ) : (
-              <EmptyState text="Image not available for this screenshot." />
-            )}
-            <KeyValueList
-              items={[
-                ["Difficulty", active.difficulty],
-                ["Live type", active.live_type],
-                ["Accuracy", `${active.accuracy}%`],
-                ["Score", active.score.toLocaleString()],
-                ["Timestamp", new Date(active.timestamp).toLocaleString()],
-              ]}
+      <div className="gallery compact-shot-gallery">
+        {items.map((item, index) => (
+          <div key={item.id} className="gallery-card compact-shot-wrap">
+            <CompactScreenshotCard
+              item={toModalItem(item)}
+              server={server}
+              onOpen={() => setActiveIndex(index)}
+              thumb={
+                item.image_available && item.image_url ? (
+                  <SecureImage path={item.image_url} alt={item.filename || `screenshot-${item.id}`} className="compact-shot-thumb" />
+                ) : (
+                  <div className="gallery-placeholder compact-shot-thumb">No image</div>
+                )
+              }
             />
           </div>
-        </div>
+        ))}
+      </div>
+      {activeIndex != null && (
+        <ScreenshotModal
+          items={modalItems}
+          index={activeIndex}
+          server={server}
+          onClose={() => setActiveIndex(null)}
+          onIndexChange={setActiveIndex}
+        />
       )}
     </>
   );
