@@ -5,3 +5,4 @@ export { EmptyState } from "./EmptyState";
 export { SectionHeader } from "./SectionHeader";
 export { SecureImage } from "./SecureImage";
 export { DateRangePicker, type DateRangeValue } from "./DateRangePicker";
+export { SearchableSelect, type SearchableSelectOption } from "./SearchableSelect";

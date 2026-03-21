@@ -19,7 +19,6 @@ import {
   api,
   type ActivityResponse,
   type CalendarResponse,
-  type CalendarYearResponse,
   type DashboardResponse,
   type ErrorCategoryActionResponse,
   type ErrorDetail,
@@ -41,7 +40,19 @@ import {
   type User,
 } from "./api";
 
-import { Card, MetricCard, LoadingCard, LoadingInline, EmptyState, SectionHeader, SecureImage, DateRangePicker, type DateRangeValue } from "./components/ui";
+import {
+  Card,
+  MetricCard,
+  LoadingCard,
+  LoadingInline,
+  EmptyState,
+  SectionHeader,
+  SecureImage,
+  DateRangePicker,
+  SearchableSelect,
+  type DateRangeValue,
+  type SearchableSelectOption,
+} from "./components/ui";
 import { KeyValueList, JobList } from "./components/data-display";
 import { BarChart, ActivitySummary, TrendChart } from "./components/charts";
 import { UploadGallery, ScreenshotGallery } from "./components/galleries";
@@ -62,6 +73,7 @@ import { recapNavLabel, stepRecapAnchor, type RecapScope } from "./stats/recapNa
 import { ScreenshotModal, type ScreenshotModalItem } from "./components/screenshots/ScreenshotModal";
 import {
   CalendarExplorerModal,
+  type CalendarYearSurface,
   calendarRangeForMode,
   type CalendarExplorerMode,
 } from "./components/calendar/CalendarExplorerModal";
@@ -1695,11 +1707,17 @@ function CalendarAnalyticsView() {
   const [mode, setMode] = useState<CalendarExplorerMode>("month");
   const [selectedEventId, setSelectedEventId] = useState("");
   const [eventSearch, setEventSearch] = useState("");
+  const [selectedSong, setSelectedSong] = useState<ReferenceSongItem | null>(null);
+  const [songSearch, setSongSearch] = useState("");
 
   const songIdRaw = searchParams.get("songId");
-  const songIdNumber = songIdRaw && /^\d+$/.test(songIdRaw) ? Number(songIdRaw) : undefined;
+  const initialSongId = songIdRaw && /^\d+$/.test(songIdRaw) ? Number(songIdRaw) : undefined;
 
   const events = useLoadable(auth.user ? () => api.getReferenceEvents(1200) : null, [auth.user?.id]);
+  const referenceSongs = useLoadable<{ max_id: number; items: ReferenceSongItem[] }>(
+    auth.user ? () => api.getReferenceSongs(0, 5000) : null,
+    [auth.user?.id],
+  );
 
   useEffect(() => {
     const d = searchParams.get("calDay");
@@ -1714,6 +1732,15 @@ function CalendarAnalyticsView() {
     if (eid) setSelectedEventId(eid);
   }, [searchParams]);
 
+  useEffect(() => {
+    if (!initialSongId || selectedSong || !referenceSongs.data?.items.length || !auth.user) return;
+    const match = referenceSongs.data.items.find((song) => Number(song.internal_song_id) === initialSongId) || null;
+    if (match) {
+      setSelectedSong(match);
+      setSongSearch("");
+    }
+  }, [initialSongId, selectedSong, referenceSongs.data?.items, auth.user]);
+
   const eventStats = useLoadable<EventStatsResponse>(
     auth.user && selectedEventId
       ? () => api.getEventStats(auth.user!.id, Number(selectedEventId), filterQuery)
@@ -1726,22 +1753,14 @@ function CalendarAnalyticsView() {
       ? { from_date: eventStats.data.from_date, to_date: eventStats.data.to_date }
       : null;
 
-  useEffect(() => {
-    if (mode === "event" && !calendarEventWindow) {
-      setMode("month");
-    }
-  }, [mode, calendarEventWindow]);
-
   const screenshotRange = useMemo(() => {
-    if (mode === "event") {
-      return calendarEventWindow;
-    }
+    if (mode === "event") return calendarEventWindow;
     return calendarRangeForMode(mode, anchorDate, null);
   }, [mode, anchorDate, calendarEventWindow]);
 
   const calendarMonth = useLoadable<CalendarResponse>(
-    auth.user && (mode === "month" || mode === "week" || mode === "day")
-      ? () => api.getCalendar(auth.user!.id, anchorDate.getFullYear(), anchorDate.getMonth() + 1, filterQuery, songIdNumber)
+    auth.user && mode === "month"
+      ? () => api.getCalendar(auth.user!.id, anchorDate.getFullYear(), anchorDate.getMonth() + 1, filterQuery, selectedSong?.internal_song_id)
       : null,
     [
       auth.user?.id,
@@ -1751,15 +1770,21 @@ function CalendarAnalyticsView() {
       filters.difficulty,
       filters.liveType,
       filters.includeMeta,
-      songIdNumber,
+      selectedSong?.internal_song_id,
     ],
   );
 
-  const calendarYear = useLoadable<CalendarYearResponse>(
+  const calendarYear = useLoadable<CalendarYearSurface>(
     auth.user && mode === "year"
-      ? () => api.getCalendarYear(auth.user!.id, anchorDate.getFullYear(), filterQuery, songIdNumber)
+      ? async () => {
+          const year = anchorDate.getFullYear();
+          const months = await Promise.all(
+            Array.from({ length: 12 }, (_, index) => api.getCalendar(auth.user!.id, year, index + 1, filterQuery, selectedSong?.internal_song_id)),
+          );
+          return { year, months };
+        }
       : null,
-    [auth.user?.id, mode, anchorDate.getFullYear(), filters.difficulty, filters.liveType, filters.includeMeta, songIdNumber],
+    [auth.user?.id, mode, anchorDate.getFullYear(), filters.difficulty, filters.liveType, filters.includeMeta, selectedSong?.internal_song_id],
   );
 
   const calendarShots = useLoadable(
@@ -1767,7 +1792,7 @@ function CalendarAnalyticsView() {
       ? () =>
           api.listScreenshots(auth.user!.id, {
             ...filterQuery,
-            ...(songIdNumber ? { songId: songIdNumber } : {}),
+            ...(selectedSong?.internal_song_id ? { songId: selectedSong.internal_song_id } : {}),
             ...screenshotRange,
             limit: mode === "day" ? 80 : 200,
             offset: 0,
@@ -1786,58 +1811,92 @@ function CalendarAnalyticsView() {
       filters.difficulty,
       filters.liveType,
       filters.includeMeta,
-      songIdNumber,
+      selectedSong?.internal_song_id,
     ],
   );
 
   if (!auth.user) return null;
   const server = auth.user.server;
+  const songs = referenceSongs.data?.items || [];
   const recentEvents = ((events.data?.items || []) as Array<Record<string, unknown>>)
     .slice()
     .filter((event) => Number.isFinite(Number(event.event_id || event.id)) && Number(event.event_id || event.id) > 0)
     .sort((a, b) => Number(b.event_id || b.id || 0) - Number(a.event_id || a.id || 0));
-  const q = eventSearch.trim().toLowerCase();
-  const filteredEvents = q
-    ? recentEvents.filter((event) => formatEventLabelDateOnly(event, server).toLowerCase().includes(q))
-    : recentEvents;
+  const eventOptions: SearchableSelectOption[] = recentEvents.map((event) => ({
+    value: String(event.event_id || event.id),
+    label: formatEventLabelDateOnly(event, server),
+    keywords: String(event.event_id || event.id || ""),
+  }));
+  const selectedEventOption = eventOptions.find((option) => option.value === selectedEventId) || null;
+  const songOptions: SearchableSelectOption[] = getSongOptions(songs, songSearch, server).map((song) => ({
+    value: String(song.internal_song_id),
+    label: correctionSongName(song, server),
+    keywords: `${song.tag} ${song.internal_song_id}`,
+    meta: `Song #${song.internal_song_id}`,
+  }));
+  const selectedSongOption = selectedSong
+    ? {
+        value: String(selectedSong.internal_song_id),
+        label: correctionSongName(selectedSong, server),
+        keywords: `${selectedSong.tag} ${selectedSong.internal_song_id}`,
+        meta: `Song #${selectedSong.internal_song_id}`,
+      }
+    : null;
 
-  const subtitle =
-    songIdNumber != null
-      ? `Filtered to song #${songIdNumber}`
-      : selectedEventId
-        ? "Pick Event mode after the event window loads to browse the full event range."
-        : "Year, month, week, day, and optional event window.";
+  const subtitle = [
+    mode === "event" && selectedEventOption ? selectedEventOption.label : null,
+    mode === "event" && !selectedEventOption ? "Choose an event to load its full range." : null,
+    selectedSong ? `Song: ${correctionSongName(selectedSong, server)}` : "All songs",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const centerControl =
+    mode === "event" ? (
+      <SearchableSelect
+        className="calendar-modal__search"
+        label="Event"
+        placeholder="Select an event"
+        value={selectedEventOption}
+        searchText={eventSearch}
+        options={eventOptions}
+        loading={events.loading}
+        emptyText="No events match this search."
+        onSearchTextChange={setEventSearch}
+        onChange={(option) => {
+          setSelectedEventId(option?.value || "");
+          setEventSearch("");
+        }}
+      />
+    ) : (
+      <SearchableSelect
+        className="calendar-modal__search"
+        label="Song"
+        placeholder="Filter by song"
+        value={selectedSongOption}
+        searchText={songSearch}
+        options={songOptions}
+        loading={referenceSongs.loading}
+        emptyText="No songs match this search."
+        onSearchTextChange={setSongSearch}
+        onChange={(option) => {
+          if (!option) {
+            setSelectedSong(null);
+            setSongSearch("");
+            return;
+          }
+          const match = songs.find((song) => String(song.internal_song_id) === option.value) || null;
+          setSelectedSong(match);
+          setSongSearch("");
+        }}
+      />
+    );
 
   return (
     <div className="page-grid">
-      <Card title="Calendar filters" subtitle="Same play filters as other analytics views.">
+      <Card title="Calendar filters" subtitle="Difficulty, live type, and meta-song scope apply across every explorer mode.">
         <div className="analytics-filter-row">
           <SectionFilterControls filters={filters} onChange={setFilters} />
-        </div>
-      </Card>
-      <Card title="Event (optional)" subtitle="Select an event to enable Event mode in the explorer.">
-        <div className="stack">
-          <label className="field">
-            <span>Search events</span>
-            <input value={eventSearch} onChange={(e) => setEventSearch(e.target.value)} placeholder="Filter by name or date" />
-          </label>
-          <label className="field inline-field">
-            <span>Event</span>
-            <select
-              value={selectedEventId}
-              onChange={(event) => {
-                setSelectedEventId(event.target.value);
-                if (!event.target.value) setMode((m) => (m === "event" ? "month" : m));
-              }}
-            >
-              <option value="">None (hide Event dates)</option>
-              {filteredEvents.slice(0, 200).map((event) => (
-                <option key={String(event.event_id || event.id)} value={String(event.event_id || event.id)}>
-                  {formatEventLabelDateOnly(event, server)}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
       </Card>
       <Card title="Explorer" subtitle={subtitle}>
@@ -1854,8 +1913,8 @@ function CalendarAnalyticsView() {
           yearState={calendarYear}
           monthState={calendarMonth}
           shotsState={calendarShots}
-          showEventMode={Boolean(selectedEventId)}
           eventRange={calendarEventWindow}
+          headerCenter={centerControl}
         />
       </Card>
     </div>
