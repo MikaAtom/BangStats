@@ -1,12 +1,18 @@
+import { useMemo } from "react";
 import type { UploadFileItem } from "../../api";
+import { useThumbnailPrewarm } from "../../hooks/useThumbnailPrewarm";
 import { EmptyState } from "../ui/EmptyState";
 import { SecureImage } from "../ui/SecureImage";
 
 interface UploadGalleryProps {
   items: UploadFileItem[];
+  userId: number;
 }
 
-export function UploadGallery({ items }: UploadGalleryProps) {
+export function UploadGallery({ items, userId }: UploadGalleryProps) {
+  const names = useMemo(() => items.slice(0, 18).map((i) => i.filename), [items]);
+  useThumbnailPrewarm(userId, [], names);
+
   if (!items.length) return <EmptyState text="No uploaded images yet." />;
   return (
     <div className="gallery">

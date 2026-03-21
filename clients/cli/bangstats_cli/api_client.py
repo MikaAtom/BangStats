@@ -632,6 +632,24 @@ class BangStatsAPI:
         response.raise_for_status()
         return response.json()
 
+    def warm_thumbnails(
+        self,
+        user_id: int,
+        *,
+        screenshot_ids: list[int] | None = None,
+        upload_filenames: list[str] | None = None,
+        scan_errors: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        """Pre-generate cached JPEG thumbnails (same as Web UI batch warm)."""
+        payload: dict[str, Any] = {
+            "screenshot_ids": screenshot_ids or [],
+            "upload_filenames": upload_filenames or [],
+            "scan_errors": scan_errors or [],
+        }
+        response = self._client.post(f"/api/users/{user_id}/thumbnails/warm", json=payload)
+        response.raise_for_status()
+        return response.json()
+
     def flush(
         self,
         *,

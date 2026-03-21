@@ -570,6 +570,28 @@ export type ScreenshotListResponse = {
   items: ScreenshotItem[];
 };
 
+export type ThumbnailWarmScanErrorRef = {
+  error_type: string;
+  json_filename: string;
+};
+
+export type ThumbnailWarmResultItem = {
+  kind: "screenshot" | "upload" | "scan_error";
+  screenshot_id: number | null;
+  filename: string | null;
+  error_type: string | null;
+  json_filename: string | null;
+  ok: boolean;
+  thumbnail_url: string | null;
+  detail: string | null;
+};
+
+export type ThumbnailWarmResponsePayload = {
+  results: ThumbnailWarmResultItem[];
+  warmed: number;
+  failed: number;
+};
+
 export type DashboardResponse = {
   user: User;
   counts: Counts;
@@ -1163,6 +1185,55 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  }
+
+  /**
+   * Pre-generate server-side thumbnail cache entries. Does not use request() so client blob caches stay intact.
+   */
+  async warmThumbnails(
+    userId: number,
+    body: {
+      screenshot_ids?: number[];
+      upload_filenames?: string[];
+      scan_errors?: ThumbnailWarmScanErrorRef[];
+    },
+  ): Promise<ThumbnailWarmResponsePayload> {
+    const headers = new Headers();
+    headers.set("Content-Type", "application/json");
+    if (this.token) {
+      headers.set("Authorization", `Bearer ${this.token}`);
+    }
+    const response = await fetch(`/api/users/${userId}/thumbnails/warm`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        screenshot_ids: body.screenshot_ids ?? [],
+        upload_filenames: body.upload_filenames ?? [],
+        scan_errors: body.scan_errors ?? [],
+      }),
+      cache: "no-store",
+    });
+    if (response.status === 401 && this.unauthorizedHandler) {
+      this.unauthorizedHandler();
+    }
+    if (!response.ok) {
+      let detail = response.statusText;
+      try {
+        const raw = await response.text();
+        if (raw) {
+          try {
+            const payload = JSON.parse(raw) as { detail?: string };
+            detail = payload.detail || raw || detail;
+          } catch {
+            detail = raw;
+          }
+        }
+      } catch {
+        detail = response.statusText;
+      }
+      throw new Error(detail || "Request failed");
+    }
+    return (await response.json()) as ThumbnailWarmResponsePayload;
   }
 }
 

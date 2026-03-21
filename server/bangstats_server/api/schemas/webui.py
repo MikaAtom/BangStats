@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from bangstats_server.api.schemas.scans import ScanJobResponse, UploadUsageResponse
 from bangstats_server.api.schemas.sync import CountsResponse, SyncJobResponse
@@ -97,3 +97,40 @@ class UserDataImportResponse(BaseModel):
     skipped_screenshots: int = 0
     unresolved_screenshot_references: list[str] = Field(default_factory=list)
     updated_user_settings: list[str] = Field(default_factory=list)
+
+
+class ScanErrorThumbRef(BaseModel):
+    error_type: str = Field(..., min_length=1, max_length=200)
+    json_filename: str = Field(..., min_length=1, max_length=500)
+
+
+class ThumbnailWarmRequest(BaseModel):
+    """Ask the server to generate cached JPEG thumbnails before the client fetches them."""
+
+    screenshot_ids: list[int] = Field(default_factory=list, max_length=120)
+    upload_filenames: list[str] = Field(default_factory=list, max_length=80)
+    scan_errors: list[ScanErrorThumbRef] = Field(default_factory=list, max_length=40)
+
+    @model_validator(mode="after")
+    def _limit_total_refs(self) -> "ThumbnailWarmRequest":
+        total = len(self.screenshot_ids) + len(self.upload_filenames) + len(self.scan_errors)
+        if total > 150:
+            raise ValueError("Too many thumbnail references (max 150 combined).")
+        return self
+
+
+class ThumbnailWarmItemResult(BaseModel):
+    kind: Literal["screenshot", "upload", "scan_error"]
+    screenshot_id: int | None = None
+    filename: str | None = None
+    error_type: str | None = None
+    json_filename: str | None = None
+    ok: bool
+    thumbnail_url: str | None = None
+    detail: str | None = None
+
+
+class ThumbnailWarmResponse(BaseModel):
+    results: list[ThumbnailWarmItemResult] = Field(default_factory=list)
+    warmed: int = 0
+    failed: int = 0

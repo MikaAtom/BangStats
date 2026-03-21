@@ -213,6 +213,11 @@ textarea {
   gap: 1rem;
 }
 
+.list-grid .list-card {
+  content-visibility: auto;
+  contain-intrinsic-size: 220px 200px;
+}
+
 .layout-two,
 .hero-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));

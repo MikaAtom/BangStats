@@ -1,6 +1,8 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from time import monotonic
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
@@ -20,6 +22,9 @@ from bangstats_server.api.schemas.webui import (
     UserDataImportResponse,
     UploadFileItemResponse,
     UploadFileListResponse,
+    ThumbnailWarmItemResult,
+    ThumbnailWarmRequest,
+    ThumbnailWarmResponse,
 )
 from bangstats_server.core.config import BANGSTATS_ENV, DB_PATH
 from bangstats_server.core.config import META_SONG_IDS
@@ -40,6 +45,7 @@ from bangstats_server.core.utils.chart_meta import chart_level_for_difficulty
 router = APIRouter()
 
 _SCAN_ERRORS_CACHE_TTL_SECONDS = 10.0
+_THUMB_WARM_MAX_WORKERS = 4
 
 
 def _normalize_image_variant(variant: str | None) -> str | None:
@@ -58,10 +64,35 @@ def _image_file_response(path: Path, *, variant: str | None) -> FileResponse:
         if thumb is not None:
             return FileResponse(thumb, media_type="image/jpeg")
     return FileResponse(path)
+
+
 _scan_errors_cache: dict[str, object] = {
     "expires_at": 0.0,
     "value": {"total": 0, "errors": {}, "error_files": {}},
 }
+
+
+def _dedupe_ints_preserve_order(values: list[int]) -> list[int]:
+    seen: set[int] = set()
+    out: list[int] = []
+    for v in values:
+        if v in seen:
+            continue
+        seen.add(v)
+        out.append(v)
+    return out
+
+
+def _dedupe_strs_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for v in values:
+        key = str(v)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
 
 
 def _cached_scan_errors(scan_service: ScanService):
@@ -444,6 +475,222 @@ def list_screenshots(
             for screenshot in page
         ],
     )
+
+
+def _thumbnail_url_for_warm_unit(user_id: int, unit: dict) -> str:
+    kind = str(unit.get("kind") or "")
+    if kind == "screenshot":
+        sid = int(unit["screenshot_id"])
+        return f"/api/users/{user_id}/screenshots/{sid}/image?variant=thumb"
+    if kind == "upload":
+        fn = str(unit["filename"])
+        return f"/api/users/{user_id}/uploads/{quote(fn, safe='')}/image?variant=thumb"
+    et = str(unit["error_type"])
+    jf = str(unit["json_filename"])
+    return f"/api/scans/errors/{quote(et, safe='')}/{quote(jf, safe='')}/image?variant=thumb"
+
+
+@router.post("/users/{user_id}/thumbnails/warm", response_model=ThumbnailWarmResponse)
+def warm_thumbnails(
+    user_id: int,
+    body: ThumbnailWarmRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Pre-generate cached thumbnail JPEGs for many images in one request.
+
+    The client can then fetch each ``thumbnail_url`` cheaply from disk cache.
+    """
+    user_id = assert_user_scope(user_id, current_user)
+    owner = UserService().get_user_by_id(user_id)
+    if not owner:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    scan_service = ScanService()
+    screenshot_service = ScreenshotService()
+    storage = UploadStorageService()
+
+    units: list[dict[str, object]] = []
+
+    for sid in _dedupe_ints_preserve_order(body.screenshot_ids):
+        if sid <= 0:
+            units.append(
+                {
+                    "kind": "screenshot",
+                    "screenshot_id": sid,
+                    "filename": None,
+                    "error_type": None,
+                    "json_filename": None,
+                    "path": None,
+                    "detail": "Invalid screenshot id",
+                }
+            )
+            continue
+        shot = screenshot_service.get_screenshot_by_id(sid)
+        if not shot or int(shot.user_id) != user_id:
+            units.append(
+                {
+                    "kind": "screenshot",
+                    "screenshot_id": sid,
+                    "filename": None,
+                    "error_type": None,
+                    "json_filename": None,
+                    "path": None,
+                    "detail": "Screenshot not found",
+                }
+            )
+            continue
+        path = _resolve_screenshot_image_path(user_id, owner, shot.filename, scan_service)
+        if path is None:
+            units.append(
+                {
+                    "kind": "screenshot",
+                    "screenshot_id": sid,
+                    "filename": None,
+                    "error_type": None,
+                    "json_filename": None,
+                    "path": None,
+                    "detail": "Image file not found",
+                }
+            )
+        else:
+            units.append(
+                {
+                    "kind": "screenshot",
+                    "screenshot_id": sid,
+                    "filename": None,
+                    "error_type": None,
+                    "json_filename": None,
+                    "path": path,
+                    "detail": None,
+                }
+            )
+
+    for raw_name in _dedupe_strs_preserve_order(body.upload_filenames):
+        safe_name = Path(str(raw_name)).name
+        if not safe_name:
+            units.append(
+                {
+                    "kind": "upload",
+                    "screenshot_id": None,
+                    "filename": str(raw_name),
+                    "error_type": None,
+                    "json_filename": None,
+                    "path": None,
+                    "detail": "Invalid filename",
+                }
+            )
+            continue
+        path = storage.resolve_user_file(user_id, safe_name)
+        if path is None:
+            units.append(
+                {
+                    "kind": "upload",
+                    "screenshot_id": None,
+                    "filename": safe_name,
+                    "error_type": None,
+                    "json_filename": None,
+                    "path": None,
+                    "detail": "Uploaded file not found",
+                }
+            )
+        else:
+            units.append(
+                {
+                    "kind": "upload",
+                    "screenshot_id": None,
+                    "filename": safe_name,
+                    "error_type": None,
+                    "json_filename": None,
+                    "path": path,
+                    "detail": None,
+                }
+            )
+
+    for ref in body.scan_errors:
+        path = scan_service._find_error_image_path(ref.error_type, ref.json_filename)
+        if path is None:
+            units.append(
+                {
+                    "kind": "scan_error",
+                    "screenshot_id": None,
+                    "filename": None,
+                    "error_type": ref.error_type,
+                    "json_filename": ref.json_filename,
+                    "path": None,
+                    "detail": "Error image not found",
+                }
+            )
+        else:
+            units.append(
+                {
+                    "kind": "scan_error",
+                    "screenshot_id": None,
+                    "filename": None,
+                    "error_type": ref.error_type,
+                    "json_filename": ref.json_filename,
+                    "path": path,
+                    "detail": None,
+                }
+            )
+
+    paths_to_warm: list[Path] = []
+    for u in units:
+        p = u.get("path")
+        if isinstance(p, Path):
+            paths_to_warm.append(p)
+
+    warmed_paths: list[Path | None] = []
+    if paths_to_warm:
+        with ThreadPoolExecutor(max_workers=_THUMB_WARM_MAX_WORKERS) as pool:
+            warmed_paths = list(pool.map(try_thumbnail_path, paths_to_warm))
+
+    wi = 0
+    results: list[ThumbnailWarmItemResult] = []
+    warmed_count = 0
+    failed_count = 0
+    for u in units:
+        kind = str(u["kind"])
+        path = u.get("path")
+        detail = u.get("detail")
+        if not isinstance(path, Path):
+            results.append(
+                ThumbnailWarmItemResult(
+                    kind=kind,  # type: ignore[arg-type]
+                    screenshot_id=u.get("screenshot_id") if u.get("screenshot_id") is not None else None,
+                    filename=u.get("filename") if isinstance(u.get("filename"), str) else None,
+                    error_type=u.get("error_type") if isinstance(u.get("error_type"), str) else None,
+                    json_filename=u.get("json_filename") if isinstance(u.get("json_filename"), str) else None,
+                    ok=False,
+                    thumbnail_url=None,
+                    detail=str(detail) if detail else "Missing file",
+                )
+            )
+            failed_count += 1
+            continue
+        got = warmed_paths[wi]
+        wi += 1
+        ok = got is not None
+        if ok:
+            warmed_count += 1
+            thumb_url = _thumbnail_url_for_warm_unit(user_id, u)
+        else:
+            failed_count += 1
+            thumb_url = None
+        results.append(
+            ThumbnailWarmItemResult(
+                kind=kind,  # type: ignore[arg-type]
+                screenshot_id=int(u["screenshot_id"]) if u.get("screenshot_id") is not None else None,
+                filename=u.get("filename") if isinstance(u.get("filename"), str) else None,
+                error_type=u.get("error_type") if isinstance(u.get("error_type"), str) else None,
+                json_filename=u.get("json_filename") if isinstance(u.get("json_filename"), str) else None,
+                ok=ok,
+                thumbnail_url=thumb_url,
+                detail=None if ok else "Thumbnail generation failed",
+            )
+        )
+
+    return ThumbnailWarmResponse(results=results, warmed=warmed_count, failed=failed_count)
 
 
 @router.get("/users/{user_id}/screenshots/{screenshot_id}/image")

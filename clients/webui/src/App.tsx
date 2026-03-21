@@ -13,6 +13,7 @@ import {
 } from "react-router-dom";
 
 import { useLoadable } from "./hooks/useLoadable";
+import { useThumbnailPrewarm } from "./hooks/useThumbnailPrewarm";
 import { useAuth } from "./auth";
 import {
   api,
@@ -666,7 +667,7 @@ function DashboardPage() {
             </Card>
           </div>
           <Card title="Recent screenshots">
-            <ScreenshotGallery items={data.recent_screenshots} server={auth.user.server} />
+            <ScreenshotGallery items={data.recent_screenshots} server={auth.user.server} userId={auth.user.id} />
           </Card>
         </>
       )}
@@ -968,7 +969,7 @@ function ScanPage() {
         <Card title="Uploaded screenshots">
           {uploads.loading && <LoadingInline />}
           {uploads.error && <div className="notice error">{uploads.error}</div>}
-          {uploads.data && <UploadGallery items={uploads.data.items} />}
+          {uploads.data && <UploadGallery items={uploads.data.items} userId={user.id} />}
         </Card>
         <Card title="Recent scan jobs">
           {jobs.loading && <LoadingInline />}
@@ -1486,7 +1487,7 @@ function OverviewAnalyticsView() {
           {progression.data ? <TrendChart data={progression.data} /> : <LoadingInline />}
         </Card>
         <Card title="Recent meaningful plays">
-          {overview.data ? <RecentPlayList items={overview.data.recent} server={server} /> : <LoadingInline />}
+          {overview.data ? <RecentPlayList items={overview.data.recent} server={server} userId={auth.user.id} /> : <LoadingInline />}
         </Card>
       </div>
       <Card title="Latest milestones">
@@ -2224,7 +2225,7 @@ function ScreenshotsAnalyticsView() {
             <div className="inline-meta">
               Showing {screenshots.data.offset + 1}-{Math.min(screenshots.data.offset + screenshots.data.items.length, screenshots.data.total)} of {screenshots.data.total}
             </div>
-            <ScreenshotGallery items={screenshots.data.items} server={auth.user.server} />
+            <ScreenshotGallery items={screenshots.data.items} server={auth.user.server} userId={auth.user.id} />
             <div className="button-row">
               <button className="button ghost" type="button" disabled={offset === 0} onClick={() => setOffset((current) => Math.max(0, current - 24))}>
                 Previous page
@@ -2711,11 +2712,27 @@ function ExclusionPill({
 function RecentPlayList({
   items,
   server,
+  userId,
 }: {
   items: RecentPlayOverview[];
   server: User["server"];
+  userId: number;
 }) {
   const [active, setActive] = useState<number | null>(null);
+  const prewarmIds = useMemo(() => {
+    const ids: number[] = [];
+    for (const item of items) {
+      const u = item.image_url;
+      if (!u) continue;
+      const m = u.match(/\/screenshots\/(\d+)\/image(?:\?|$)/);
+      if (!m) continue;
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n > 0) ids.push(n);
+    }
+    return ids;
+  }, [items]);
+  useThumbnailPrewarm(userId, prewarmIds);
+
   if (!items.length) return <EmptyState text="No recent plays found." />;
   const modalItems: ScreenshotModalItem[] = items.map((item) => ({
     song_id: item.song_id,

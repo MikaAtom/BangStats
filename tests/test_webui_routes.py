@@ -153,6 +153,66 @@ def test_get_screenshot_image_invalid_variant(monkeypatch: pytest.MonkeyPatch, t
     assert response.status_code == 400
 
 
+def test_post_thumbnails_warm_generates_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from PIL import Image
+
+    image_path = tmp_path / "warm.png"
+    Image.new("RGB", (80, 80), color=(200, 10, 50)).save(image_path, format="PNG")
+
+    fake_user = SimpleNamespace(
+        id=7,
+        username="test",
+        game_id="gid",
+        server="en",
+        screenshots_source="local",
+        screenshots_path="/tmp/screens",
+        server_folder_authorized=True,
+    )
+    monkeypatch.setattr(webui_router.UserService, "get_user_by_id", lambda self, user_id: fake_user)
+    monkeypatch.setattr(
+        webui_router.ScreenshotService,
+        "get_screenshot_by_id",
+        lambda self, screenshot_id: SimpleNamespace(
+            id=screenshot_id,
+            user_id=7,
+            filename="warm.png",
+        ),
+    )
+    monkeypatch.setattr(
+        webui_router.UploadStorageService,
+        "resolve_user_file",
+        lambda self, user_id, filename: image_path,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/users/7/thumbnails/warm",
+            json={"screenshot_ids": [42], "upload_filenames": [], "scan_errors": []},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["warmed"] == 1
+    assert payload["failed"] == 0
+    assert len(payload["results"]) == 1
+    assert payload["results"][0]["ok"] is True
+    assert "variant=thumb" in payload["results"][0]["thumbnail_url"]
+
+
+def test_post_thumbnails_warm_rejects_too_many_refs():
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/users/7/thumbnails/warm",
+            json={
+                "screenshot_ids": list(range(1, 101)),
+                "upload_filenames": [f"{i}.png" for i in range(55)],
+                "scan_errors": [],
+            },
+        )
+
+    assert response.status_code == 422
+
+
 def test_meta_song_config_and_export_import_routes(monkeypatch: pytest.MonkeyPatch):
     fake_user = SimpleNamespace(
         id=7,

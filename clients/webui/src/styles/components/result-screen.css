@@ -107,6 +107,13 @@
   padding: 0;
 }
 
+/* Skip layout/paint for off-screen gallery cells (virtualized + non-virtualized). */
+.compact-shot-gallery .gallery-card.compact-shot-wrap,
+.virtual-screenshot-gallery .gallery-card.compact-shot-wrap {
+  content-visibility: auto;
+  contain-intrinsic-size: 120px 200px;
+}
+
 .compact-shot-card:hover {
   border-color: var(--accent, #7c5cff);
 }
@@ -157,6 +164,8 @@
 
 .journey-timeline__item {
   width: 100%;
+  content-visibility: auto;
+  contain-intrinsic-size: 120px 260px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: var(--bg-secondary);
