@@ -338,6 +338,23 @@ export function CalendarExplorerModal({
   const showHourGrid = !shotsIdle && !shotsState.error && orderedShots.length > 0;
   const showShotEmpty = !shotsIdle && !shotsState.loading && !shotsState.error && orderedShots.length === 0;
   const screenshotCountLabel = !shotsIdle && shotsState.data ? `${shotsState.data.total || orderedShots.length} screenshots` : "";
+  const monthSummaryLabel =
+    mode === "month" && monthState.data
+      ? (() => {
+          const activeDays = monthState.data.days.filter((day) => day.plays > 0).length;
+          const totalPlays = monthState.data.days.reduce((total, day) => total + day.plays, 0);
+          return `${activeDays} active days · ${totalPlays} plays`;
+        })()
+      : "";
+  const headerSubtitle = (() => {
+    if (mode === "month") {
+      return monthSummaryLabel ? `${rangeLabel} · ${monthSummaryLabel}` : rangeLabel;
+    }
+    if (screenshotCountLabel) {
+      return `${rangeLabel} · ${screenshotCountLabel}`;
+    }
+    return rangeLabel;
+  })();
 
   if (!open) return null;
 
@@ -352,22 +369,21 @@ export function CalendarExplorerModal({
         <div className="calendar-modal__toprow">
           <div className="calendar-modal__heading">
             <h3>{title}</h3>
-            <div className="calendar-modal__meta">
-              <span className="inline-meta calendar-modal__meta-range">{rangeLabel}</span>
-              <span className="inline-meta calendar-modal__meta-count">{screenshotCountLabel}</span>
-            </div>
+            <div className="inline-meta calendar-modal__meta">{headerSubtitle}</div>
           </div>
-          <div className="calendar-modal__toolbar">
-            <div className="calendar-modal__mode">
-              <span className="calendar-modal__mode-label">Mode</span>
-              <select value={mode} onChange={(event) => onModeChange(event.target.value as CalendarExplorerMode)}>
-                <option value="year">Year</option>
-                <option value="month">Month</option>
-                <option value="week">Week</option>
-                <option value="day">Day</option>
-                <option value="event">Event</option>
-              </select>
-            </div>
+          <div className={`calendar-modal__focus${headerCenter ? "" : " calendar-modal__focus--empty"}`}>
+            {headerCenter}
+          </div>
+          <div className="calendar-modal__mode">
+            <select value={mode} onChange={(event) => onModeChange(event.target.value as CalendarExplorerMode)}>
+              <option value="year">Year</option>
+              <option value="month">Month</option>
+              <option value="week">Week</option>
+              <option value="day">Day</option>
+              <option value="event">Event</option>
+            </select>
+          </div>
+          <div className="calendar-modal__actions">
             <div className="calendar-modal__nav">
               <button
                 className="button ghost"
@@ -398,7 +414,6 @@ export function CalendarExplorerModal({
                 Next
               </button>
             </div>
-            {headerCenter ? <div className="calendar-modal__focus">{headerCenter}</div> : null}
             {secondaryControls ? (
               <button className="button ghost calendar-modal__filter-toggle" type="button" onClick={() => setFiltersOpen((current) => !current)}>
                 Filters{secondaryControlsCount > 0 ? ` (${secondaryControlsCount})` : ""}

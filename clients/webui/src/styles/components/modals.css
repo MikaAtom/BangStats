@@ -67,20 +67,14 @@
   align-items: stretch;
 }
 
-.calendar-modal__toolbar {
-  display: flex;
-  align-items: end;
-  justify-content: flex-end;
-  flex-wrap: nowrap;
-  justify-self: end;
-  max-width: 100%;
+.calendar-modal__focus {
+  width: 100%;
   min-width: 0;
-  gap: var(--space-3);
+  align-self: end;
 }
 
-.calendar-modal__focus {
-  width: min(20rem, 100%);
-  min-width: 16rem;
+.calendar-modal__focus--empty {
+  min-height: 0;
 }
 
 .calendar-modal__focus .searchable-select__menu {
@@ -103,7 +97,7 @@
 
 .calendar-modal__toprow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 20rem) 7.5rem auto;
   gap: var(--space-4);
   align-items: end;
 }
@@ -119,26 +113,25 @@
 }
 
 .calendar-modal__meta {
-  display: grid;
-  grid-template-columns: minmax(18ch, max-content) minmax(14ch, max-content);
-  gap: var(--space-3);
-  align-items: center;
-  min-height: 1.25rem;
-}
-
-.calendar-modal__meta-range,
-.calendar-modal__meta-count {
   white-space: nowrap;
-}
-
-.calendar-modal__meta-count {
-  min-width: 14ch;
+  min-height: 1.25rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .calendar-modal__nav {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+.calendar-modal__actions {
+  display: inline-flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  justify-self: end;
+  min-width: 0;
 }
 
 .calendar-modal__filters {
@@ -156,22 +149,15 @@
 
 .calendar-modal__mode {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
+  align-items: end;
+  justify-content: flex-end;
   flex-shrink: 0;
 }
 
-.calendar-modal__mode-label {
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  font-weight: var(--font-medium);
-  white-space: nowrap;
-}
-
 .calendar-modal__mode select {
-  width: auto;
+  width: 7.5rem;
   min-width: 7.5rem;
-  max-width: 11rem;
+  max-width: 7.5rem;
 }
 
 .calendar-modal__search {
@@ -644,22 +630,11 @@
   }
 
   .calendar-modal__toprow {
-    grid-template-columns: 1fr;
-  }
-
-  .calendar-modal__toolbar {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .calendar-modal__meta {
-    grid-template-columns: 1fr;
-    gap: var(--space-1);
+    grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem) 7.5rem auto;
   }
 
   .calendar-modal__focus {
-    width: min(20rem, 100%);
-    min-width: 14rem;
+    width: 100%;
   }
 
   .calendar-year__grid {
@@ -668,19 +643,38 @@
 }
 
 @media (max-width: 720px) {
-  .calendar-modal__toolbar {
+  .calendar-modal__toprow {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .calendar-modal__focus {
     width: 100%;
-    justify-content: flex-end;
-    flex-wrap: wrap;
+    min-width: 0;
   }
 
+  .calendar-modal__focus--empty {
+    display: none;
+  }
+
+  .calendar-modal__focus,
   .calendar-modal__mode,
-  .calendar-modal__nav {
-    width: auto;
+  .calendar-modal__actions {
+    justify-self: stretch;
   }
 
-  .calendar-modal__nav {
-    justify-content: flex-end;
+  .calendar-modal__mode {
+    justify-content: flex-start;
+  }
+
+  .calendar-modal__mode select {
+    width: min(12rem, 100%);
+    min-width: 0;
+    max-width: none;
+  }
+
+  .calendar-modal__actions {
+    justify-content: flex-start;
   }
 
   .calendar-year__grid {
