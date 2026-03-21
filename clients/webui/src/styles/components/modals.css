@@ -664,7 +664,7 @@
   }
 
   .calendar-modal__mode {
-    justify-content: flex-start;
+    justify-content: flex-end;
   }
 
   .calendar-modal__mode select {
@@ -674,7 +674,7 @@
   }
 
   .calendar-modal__actions {
-    justify-content: flex-start;
+    justify-content: flex-end;
   }
 
   .calendar-year__grid {
