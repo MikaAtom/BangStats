@@ -418,8 +418,8 @@
 
   .trend-chart-overview__plot,
   .trend-chart--overview {
-    min-height: 280px;
-    height: 280px;
+    min-height: clamp(200px, 52vw, 240px);
+    height: clamp(200px, 52vw, 240px);
   }
 
   .trend-chart-overview__meta {
@@ -438,5 +438,11 @@
 
   .calendar-cell {
     min-height: 60px;
+  }
+
+  .trend-chart-overview__plot,
+  .trend-chart--overview {
+    min-height: clamp(188px, 50vw, 212px);
+    height: clamp(188px, 50vw, 212px);
   }
 }
