@@ -644,37 +644,34 @@
 
 @media (max-width: 720px) {
   .calendar-modal__toprow {
-    grid-template-columns: 1fr;
-    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr) 7.5rem auto;
+    align-items: end;
+  }
+
+  .calendar-modal__heading {
+    grid-column: 1 / -1;
   }
 
   .calendar-modal__focus {
+    grid-column: 1;
     width: 100%;
     min-width: 0;
   }
 
-  .calendar-modal__focus--empty {
-    display: none;
-  }
-
-  .calendar-modal__focus,
-  .calendar-modal__mode,
-  .calendar-modal__actions {
-    justify-self: stretch;
-  }
-
   .calendar-modal__mode {
-    justify-content: flex-end;
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  .calendar-modal__actions {
+    grid-column: 3;
+    justify-self: end;
   }
 
   .calendar-modal__mode select {
-    width: min(12rem, 100%);
-    min-width: 0;
-    max-width: none;
-  }
-
-  .calendar-modal__actions {
-    justify-content: flex-end;
+    width: 7.5rem;
+    min-width: 7.5rem;
+    max-width: 7.5rem;
   }
 
   .calendar-year__grid {
