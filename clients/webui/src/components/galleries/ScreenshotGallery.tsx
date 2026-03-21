@@ -21,17 +21,19 @@ export function ScreenshotGallery({ items }: ScreenshotGalleryProps) {
             ) : (
               <div className="gallery-placeholder">No image</div>
             )}
-            <div className="gallery-meta">
+            <div className="gallery-meta compact-screenshot-meta">
               <strong>{item.song_name || `Song ${item.song_id}`}</strong>
-              <span>
-                {item.difficulty} | {item.live_type}
-              </span>
-              <span>
-                {new Date(item.timestamp).toLocaleString()} | {item.accuracy}% acc
-              </span>
-              <small>
-                Score {item.score.toLocaleString()}
-              </small>
+              <span>{item.difficulty}</span>
+              <div className="screenshot-stat-grid">
+                <span>Perfect</span><span>{item.perfect}</span>
+                <span>Fast</span><span>{item.fast}</span>
+                <span>Great</span><span>{item.great}</span>
+                <span>Slow</span><span>{item.slow}</span>
+                <span>Good</span><span>{item.good}</span>
+                <span>Max combo</span><span>{item.max_combo}</span>
+                <span>Bad</span><span>{item.bad}</span>
+                <span>Miss</span><span>{item.miss}</span>
+              </div>
             </div>
           </button>
         ))}
@@ -45,20 +47,34 @@ export function ScreenshotGallery({ items }: ScreenshotGalleryProps) {
                 Close
               </button>
             </div>
-            {active.image_available && active.image_url ? (
-              <SecureImage path={active.image_url} alt={active.filename || ""} className="viewer-image" />
-            ) : (
-              <EmptyState text="Image not available for this screenshot." />
-            )}
-            <KeyValueList
-              items={[
-                ["Difficulty", active.difficulty],
-                ["Live type", active.live_type],
-                ["Accuracy", `${active.accuracy}%`],
-                ["Score", active.score.toLocaleString()],
-                ["Timestamp", new Date(active.timestamp).toLocaleString()],
-              ]}
-            />
+            <div className="layout-two">
+              <div>
+                {active.image_available && active.image_url ? (
+                  <SecureImage path={active.image_url} alt={active.filename || ""} className="viewer-image" />
+                ) : (
+                  <EmptyState text="Image not available for this screenshot." />
+                )}
+              </div>
+              <div>
+                <KeyValueList
+                  items={[
+                    ["Difficulty", active.difficulty],
+                    ["Live type", active.live_type],
+                    ["Perfect", String(active.perfect)],
+                    ["Fast", String(active.fast)],
+                    ["Great", String(active.great)],
+                    ["Slow", String(active.slow)],
+                    ["Good", String(active.good)],
+                    ["Max combo", String(active.max_combo)],
+                    ["Bad", String(active.bad)],
+                    ["Miss", String(active.miss)],
+                    ["Accuracy", `${active.accuracy}%`],
+                    ["Score", active.score.toLocaleString()],
+                    ["Timestamp", new Date(active.timestamp).toLocaleString()],
+                  ]}
+                />
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -17,6 +17,14 @@ class ScreenshotItemResponse(BaseModel):
     live_type: str
     score: int
     accuracy: float
+    perfect: int
+    great: int
+    good: int
+    bad: int
+    miss: int
+    fast: int
+    slow: int
+    max_combo: int
     full_combo: bool
     all_perfect: bool
     anomaly: bool

@@ -2672,6 +2672,7 @@ function RecapPanel({ data }: { data: RecapResponse }) {
         <MetricCard label="Scope" value={data.title} />
         <MetricCard label="Skill score" value={data.skill_score} />
         <MetricCard label="Delta" value={data.skill_score_delta} />
+        <MetricCard label="Total plays" value={data.summary.total_plays || 0} />
         <MetricCard label="Sessions" value={data.sessions.total_sessions || 0} />
       </div>
       <div className="card-grid recap-grid">
@@ -2684,15 +2685,9 @@ function RecapPanel({ data }: { data: RecapResponse }) {
           </div>
         ))}
       </div>
-      <div className="layout-two">
-        <div>
-          <div className="subheading">Top songs</div>
-          <BarChart items={data.top_songs.map((item) => ({ label: item.song_name || `#${item.song_id}`, value: item.play_count }))} />
-        </div>
-        <div>
-          <div className="subheading">Most practiced</div>
-          <BarChart items={data.most_practiced.map((item) => ({ label: item.song_name || `#${item.song_id}`, value: item.play_count }))} />
-        </div>
+      <div>
+        <div className="subheading">Top songs</div>
+        <BarChart items={data.top_songs.map((item) => ({ label: item.song_name || `#${item.song_id}`, value: item.play_count }))} />
       </div>
       <div className="layout-two">
         <div>

@@ -503,6 +503,14 @@ export type ScreenshotItem = {
   live_type: string;
   score: number;
   accuracy: number;
+  perfect: number;
+  great: number;
+  good: number;
+  bad: number;
+  miss: number;
+  fast: number;
+  slow: number;
+  max_combo: number;
   full_combo: boolean;
   all_perfect: boolean;
   anomaly: boolean;

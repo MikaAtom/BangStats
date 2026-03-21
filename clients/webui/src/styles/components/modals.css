@@ -106,6 +106,26 @@
   padding: var(--space-3) var(--space-4);
 }
 
+.compact-screenshot-meta {
+  gap: var(--space-2);
+}
+
+.screenshot-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: var(--space-3);
+  row-gap: 2px;
+  font-size: var(--text-sm);
+}
+
+.screenshot-stat-grid span:nth-child(odd) {
+  color: var(--text-secondary);
+}
+
+.screenshot-stat-grid span:nth-child(even) {
+  font-variant-numeric: tabular-nums;
+}
+
 .gallery-meta small {
   color: var(--text-secondary);
 }
