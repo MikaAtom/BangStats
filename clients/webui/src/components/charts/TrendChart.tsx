@@ -343,56 +343,39 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
       const box = pointBoxes[index]!;
       const prev = points[index - 1];
       const next = points[index + 1];
-      const tangent = normalize(
-        prev && next
-          ? { x: next.x - prev.x, y: next.y - prev.y }
-          : next
-            ? { x: next.x - point.x, y: next.y - point.y }
-            : prev
-              ? { x: point.x - prev.x, y: point.y - prev.y }
-              : { x: 1, y: 0 },
-      );
-      const normal = normalize({ x: -tangent.y, y: tangent.x });
-      const desiredVertical: Vector =
-        point.isValley || (!prev && next && next.y < point.y) || (!next && prev && prev.y < point.y) ? { x: 0, y: 1 } : { x: 0, y: -1 };
-      const sideVectors = [normal, { x: -normal.x, y: -normal.y }].sort(
-        (a, b) => dot(b, desiredVertical) - dot(a, desiredVertical),
-      );
-      const radialBase = dotRadius + Math.max(box.height / 2, box.width / 8, lineWidth * 2);
-      const radialStep = Math.max(box.height * 0.7, dotRadius * 0.75, lineWidth * 2.5);
-      const maxRadius = Math.max(radialBase + radialStep * 6, Math.min(innerW, innerH) / 2);
-      const tangentStep = Math.max(box.width / 4, dotRadius * 0.9);
-      const tangentLimit = Math.max(box.width, innerW / Math.max(3, n - 1));
+      const prefersBelow = point.isValley || (!prev && next && next.y < point.y) || (!next && prev && prev.y < point.y);
+      const verticalDirection = prefersBelow ? 1 : -1;
+      const distanceBase = dotRadius + box.height / 2 + Math.max(lineWidth * 2.5, box.height * 0.2);
+      const distanceStep = Math.max(box.height * 0.65, dotRadius * 0.8, lineWidth * 2.5);
+      const maxDistance = Math.max(distanceBase + distanceStep * 5, innerH / 3);
+      const horizontalStep = Math.max(box.width / 3.2, dotRadius);
+      const horizontalLimit = Math.max(box.width * 0.9, innerW / Math.max(3, n - 1));
       let placed: PlacedPointLabel | null = null;
 
-      for (const side of sideVectors) {
-        let radius = radialBase;
-        while (radius <= maxRadius + radialStep * 0.5) {
-          for (const tangentShift of collectShiftSeries(tangentLimit, tangentStep)) {
-            const x = point.x + side.x * radius + tangent.x * tangentShift;
-            const y = point.y + side.y * radius + tangent.y * tangentShift;
-            const rect = rectFromMeasured(box, x, y);
-            const inside = rectInsideBounds(rect, chartBounds);
-            const blocked =
-              !inside ||
-              pointLabelRects.some((other) => overlaps(expandRect(rect, box.height * 0.14, box.height * 0.14), other)) ||
-              dotRects.some((other) => overlaps(expandRect(rect, box.height * 0.1, box.height * 0.1), other)) ||
-              guideRects.some((other) => overlaps(expandRect(rect, guideWidth, guideWidth), other)) ||
-              lineBlocked(rect, box);
-            if (!blocked) {
-              placed = { x, y, text: String(point.skill_score), rect };
-              break;
-            }
+      let distance = distanceBase;
+      while (distance <= maxDistance + distanceStep * 0.5) {
+        for (const horizontalShift of collectShiftSeries(horizontalLimit, horizontalStep)) {
+          const x = point.x + horizontalShift;
+          const y = point.y + verticalDirection * distance;
+          const rect = rectFromMeasured(box, x, y);
+          const inside = rectInsideBounds(rect, chartBounds);
+          const blocked =
+            !inside ||
+            pointLabelRects.some((other) => overlaps(expandRect(rect, box.height * 0.2, box.height * 0.16), other)) ||
+            dotRects.some((other) => overlaps(expandRect(rect, box.height * 0.14, box.height * 0.14), other)) ||
+            guideRects.some((other) => overlaps(expandRect(rect, box.height * 0.12, box.height * 0.12), other)) ||
+            lineBlocked(rect, box);
+          if (!blocked) {
+            placed = { x, y, text: String(point.skill_score), rect };
+            break;
           }
-          if (placed) break;
-          radius += radialStep;
         }
         if (placed) break;
+        distance += distanceStep;
       }
 
       if (!placed) {
-        const preferredSide = sideVectors[0]!;
-        const fallbackRect = clampRectToBounds(rectFromMeasured(box, point.x + preferredSide.x * radialBase, point.y + preferredSide.y * radialBase), chartBounds);
+        const fallbackRect = clampRectToBounds(rectFromMeasured(box, point.x, point.y + verticalDirection * distanceBase), chartBounds);
         placed = {
           x: fallbackRect.left - box.left,
           y: fallbackRect.top - box.top,
@@ -418,16 +401,12 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
       const normal = normalize({ x: -tangent.y, y: tangent.x });
       const midpoint = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
       const segmentLength = Math.max(vectorLength({ x: end.x - start.x, y: end.y - start.y }), 1);
-      const sideVectors = [normal, { x: -normal.x, y: -normal.y }].sort((a, b) => {
-        const aRoom = Math.min(midpoint.y + a.y * box.height - chartBounds.top, chartBounds.bottom - (midpoint.y + a.y * box.height));
-        const bRoom = Math.min(midpoint.y + b.y * box.height - chartBounds.top, chartBounds.bottom - (midpoint.y + b.y * box.height));
-        return bRoom - aRoom;
-      });
-      const normalBase = dotRadius + lineWidth * 2 + Math.max(box.height / 2, box.width / 10);
-      const normalStep = Math.max(box.height * 0.6, lineWidth * 3, dotRadius * 0.8);
+      const normalBase = dotRadius + box.height / 2 + Math.max(lineWidth * 3, box.height * 0.28);
+      const normalStep = Math.max(box.height * 0.7, lineWidth * 3, dotRadius * 0.85);
       const maxNormal = Math.max(normalBase + normalStep * 5, innerH / 3);
-      const tangentLimit = Math.max(0, segmentLength / 2 - dotRadius * 1.5);
-      const tangentStep = Math.max(box.width / 3.5, dotRadius * 0.8);
+      const tangentLimit = Math.max(0, segmentLength / 2 - Math.max(dotRadius * 1.6, box.width * 0.22));
+      const tangentStep = Math.max(box.width / 3.8, dotRadius * 0.8);
+      const sideVectors = [normal, { x: -normal.x, y: -normal.y }].sort((a, b) => (midpoint.y + a.y * normalBase) - (midpoint.y + b.y * normalBase));
       let placed: PlacedDeltaLabel | null = null;
 
       for (const side of sideVectors) {
@@ -440,9 +419,10 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
             const inside = rectInsideBounds(rect, chartBounds);
             const blocked =
               !inside ||
-              pointLabelRects.some((other) => overlaps(expandRect(rect, box.height * 0.18, box.height * 0.18), other)) ||
-              deltaRects.some((other) => overlaps(expandRect(rect, box.height * 0.18, box.height * 0.18), other)) ||
-              dotRects.some((other) => overlaps(expandRect(rect, box.height * 0.12, box.height * 0.12), other)) ||
+              pointLabelRects.some((other) => overlaps(expandRect(rect, box.height * 0.24, box.height * 0.2), other)) ||
+              deltaRects.some((other) => overlaps(expandRect(rect, box.height * 0.22, box.height * 0.18), other)) ||
+              dotRects.some((other) => overlaps(expandRect(rect, box.height * 0.14, box.height * 0.14), other)) ||
+              guideRects.some((other) => overlaps(expandRect(rect, box.height * 0.14, box.height * 0.14), other)) ||
               lineBlocked(rect, box);
             if (!blocked) {
               placed = { key: `${point.label}-${next.label}`, x, y, label, rect };
