@@ -28,7 +28,6 @@ type PlacedPointLabel = {
   y: number;
   text: string;
   rect: Rect;
-  side: "above" | "below";
 };
 
 type PlacedDeltaLabel = {
@@ -123,9 +122,9 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
   const deltaFontSize = variant === "overview" ? 2.3 : 0;
   const valueLabelHeight = estimateTextHeight(valueFontSize);
   const deltaLabelHeight = estimateTextHeight(deltaFontSize);
-  const topValueBand = variant === "overview" ? valueLabelHeight + dotRadius * 1.1 : 0;
-  const bottomValueBand = variant === "overview" ? valueLabelHeight + dotRadius * 1.5 : 0;
-  const deltaBand = variant === "overview" ? deltaLabelHeight + dotRadius * 0.7 : 0;
+  const topValueBand = variant === "overview" ? valueLabelHeight + dotRadius * 1.55 : 0;
+  const bottomValueBand = variant === "overview" ? valueLabelHeight + dotRadius * 1.8 : 0;
+  const deltaBand = variant === "overview" ? deltaLabelHeight + dotRadius * 0.95 : 0;
   const plotTop = padTop + topValueBand + deltaBand;
   const plotBottom = vbH - padBottom - bottomValueBand;
   const innerH = (variant === "overview" ? plotBottom - plotTop : vbH - padTop - padBottom);
@@ -171,40 +170,17 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
       left: 1.2,
       right: vbW - 1.2,
     };
-    const valueOffset = dotRadius + valueLabelHeight / 2 + valueFontSize * 0.14;
-    const pointLabels: PlacedPointLabel[] = points.map((point, index) => {
-      const prev = points[index - 1];
-      const next = points[index + 1];
+    const valueOffset = dotRadius + valueLabelHeight / 2 + valueFontSize * 0.22;
+    const pointLabels: PlacedPointLabel[] = points.map((point) => {
       const text = String(point.skill_score);
       const width = estimateTextWidth(text, valueFontSize);
       const x = clamp(point.x, horizontalBounds.left + width / 2, horizontalBounds.right - width / 2);
-      const topClearance = point.y - plotTop;
-      const bottomClearance = plotBottom - point.y;
-      let prefersBelow = point.isValley;
-
-      if (!prev && next) {
-        prefersBelow = next.y < point.y;
-      } else if (!next && prev) {
-        prefersBelow = prev.y < point.y;
-      } else if (prev && next && !point.isValley) {
-        const descendingIntoPoint = prev.y < point.y && next.y > point.y;
-        const risingFromPoint = prev.y > point.y && next.y < point.y;
-        if (descendingIntoPoint) prefersBelow = true;
-        else if (risingFromPoint) prefersBelow = false;
-      }
-
-      const minimumClearance = valueOffset + valueLabelHeight / 2;
-      if (prefersBelow && bottomClearance < minimumClearance && topClearance > bottomClearance) prefersBelow = false;
-      if (!prefersBelow && topClearance < minimumClearance && bottomClearance > topClearance) prefersBelow = true;
-
-      const side = prefersBelow ? "below" : "above";
-      const y = side === "below" ? point.y + valueOffset : point.y - valueOffset;
+      const y = point.isValley ? point.y + valueOffset : point.y - valueOffset;
       return {
         x,
         y,
         text,
         rect: rectFromCenter(x, y, width, valueLabelHeight),
-        side,
       };
     });
 
@@ -226,20 +202,9 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
       const isDescending = end.y > start.y;
       const upperNormal = normal.y <= 0 ? normal : { x: -normal.x, y: -normal.y };
       const lowerNormal = { x: -upperNormal.x, y: -upperNormal.y };
-      const startLabel = pointLabels[index]!;
-      const endLabel = pointLabels[index + 1]!;
-      const upperPressure = (startLabel.side === "above" ? 1 : 0) + (endLabel.side === "above" ? 1 : 0);
-      const lowerPressure = (startLabel.side === "below" ? 1 : 0) + (endLabel.side === "below" ? 1 : 0);
-      const primarySide =
-        upperPressure === lowerPressure
-          ? isDescending
-            ? upperNormal
-            : lowerNormal
-          : upperPressure < lowerPressure
-            ? upperNormal
-            : lowerNormal;
-      const secondarySide = primarySide === upperNormal ? lowerNormal : upperNormal;
-      const baseOffset = dotRadius + height / 2 + deltaFontSize * 0.34;
+      const primarySide = isDescending ? upperNormal : lowerNormal;
+      const secondarySide = isDescending ? lowerNormal : upperNormal;
+      const baseOffset = dotRadius + height / 2 + deltaFontSize * 0.46;
       const extraOffset = deltaFontSize * 0.5;
 
       const placeDelta = (side: Vector, offset: number) => {
