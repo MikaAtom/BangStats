@@ -143,12 +143,14 @@
 
 .table-wrap {
   overflow-x: auto;
+  min-width: 0;
 }
 
 .data-table {
   width: 100%;
   border-collapse: collapse;
   min-width: 640px;
+  table-layout: fixed;
 }
 
 .data-table th,
@@ -172,11 +174,13 @@
 .data-table .th-sort {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-2);
   background: none;
   border: none;
   padding: 0;
   margin: 0;
+  width: 100%;
   font: inherit;
   color: inherit;
   text-transform: inherit;
@@ -192,11 +196,53 @@
 
 .data-table .th-sort__arrow {
   display: inline-block;
-  width: 1ch;
+  width: 1.25rem;
+  flex: 0 0 1.25rem;
   text-align: center;
   color: var(--purple-300);
 }
 
 .data-table td:nth-child(n + 2) {
   text-align: right;
+}
+
+.song-rankings-table-wrap {
+  position: relative;
+}
+
+.song-rankings-table-wrap.is-refreshing {
+  opacity: 0.82;
+}
+
+.song-rankings-col--song {
+  width: auto;
+}
+
+.song-rankings-col--metric {
+  width: 8rem;
+}
+
+.song-rankings-col--latest {
+  width: 12rem;
+}
+
+.song-rankings-cell {
+  min-width: 0;
+}
+
+.song-rankings-cell--song {
+  text-align: left;
+}
+
+.song-rankings-cell--metric,
+.song-rankings-cell--latest {
+  text-align: right;
+}
+
+.song-rankings-link {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

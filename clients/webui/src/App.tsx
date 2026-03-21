@@ -63,7 +63,7 @@ import {
 } from "./utils/format";
 import { dateRangeToQuery, resolveAbsoluteDateRange, sectionFiltersToQuery, type SectionFilterState } from "./stats/statsQuery";
 import { recapNavLabel, stepRecapAnchor, type RecapScope } from "./stats/recapNav";
-import { CompactScreenshotCard, ScreenshotModal, type ScreenshotModalItem } from "./components/screenshots/ScreenshotModal";
+import { ScreenshotModal, type ScreenshotModalItem } from "./components/screenshots/ScreenshotModal";
 import {
   CalendarExplorerModal,
   calendarRangeForMode,
@@ -89,6 +89,11 @@ const DIFFICULTY_FILTERS = ["easy", "normal", "hard", "expert", "special"];
 const LIVE_TYPE_FILTERS = ["normal_live", "event_live", "challenge_live", "multi_live", "vs_live", "free_live"];
 const CORRECTION_DIFFICULTIES = ["easy", "normal", "hard", "expert", "special"] as const;
 const CORRECTION_LIVE_TYPES = ["free live", "multi live", "challenge live", "team live battle", "medley live"] as const;
+const SONG_RANKING_SORT_KEYS = ["play_count", "fc_count", "ap_count", "skill_score"] as const;
+
+type SongRankingRow = SongRankingsResponse["items"][number];
+type SongRankingSortKey = (typeof SONG_RANKING_SORT_KEYS)[number];
+type SortOrder = "asc" | "desc";
 
 type CorrectionFormState = {
   song_name_from_top_bar_text: string;
@@ -122,6 +127,38 @@ function parseBool(value: unknown, fallback = false) {
     return ["1", "true", "yes", "on", "y"].includes(value.trim().toLowerCase());
   }
   return fallback;
+}
+
+function songRankingSortValue(item: SongRankingRow, sortBy: SongRankingSortKey) {
+  switch (sortBy) {
+    case "skill_score":
+      return [Number(item.skill_score || 0), Number(item.play_count || 0)];
+    case "fc_count":
+      return [Number(item.fc_count || 0), Number(item.play_count || 0)];
+    case "ap_count":
+      return [Number(item.ap_count || 0), Number(item.play_count || 0)];
+    case "play_count":
+    default:
+      return [Number(item.play_count || 0), Number(item.skill_score || 0)];
+  }
+}
+
+function compareSongRankingRows(a: SongRankingRow, b: SongRankingRow, sortBy: SongRankingSortKey, sortOrder: SortOrder) {
+  const [aPrimary, aSecondary] = songRankingSortValue(a, sortBy);
+  const [bPrimary, bSecondary] = songRankingSortValue(b, sortBy);
+  const direction = sortOrder === "asc" ? 1 : -1;
+
+  if (aPrimary !== bPrimary) return direction * (aPrimary - bPrimary);
+  if (aSecondary !== bSecondary) return direction * (aSecondary - bSecondary);
+
+  const aName = String(a.song_name || "").toLowerCase();
+  const bName = String(b.song_name || "").toLowerCase();
+  if (aName !== bName) return aName.localeCompare(bName);
+  return Number(a.song_id || 0) - Number(b.song_id || 0);
+}
+
+function sortSongRankingRows(items: SongRankingsResponse["items"], sortBy: SongRankingSortKey, sortOrder: SortOrder) {
+  return [...items].sort((a, b) => compareSongRankingRows(a, b, sortBy, sortOrder));
 }
 
 function parseNumber(value: unknown, fallback = 0) {
@@ -1483,20 +1520,70 @@ function OverviewAnalyticsView() {
           <LoadingInline />
         )}
       </Card>
-      <div className="layout-two">
-        <Card title="Current progress snapshot" subtitle="Skill score per period — hover chart points for details">
-          {progression.data ? <TrendChart data={progression.data} /> : <LoadingInline />}
-        </Card>
-        <Card title="Recent meaningful plays">
+      <div className="overview-layout">
+        <div className="overview-layout__primary">
+          <Card title="Current progress snapshot" className="overview-card overview-card--chart">
+            {progression.data ? <TrendChart data={progression.data} variant="overview" server={server} /> : <LoadingInline />}
+          </Card>
+          <div className="overview-layout__secondary">
+            <Card title="This month" className="overview-card overview-card--activity">
+              {progression.data ? <OverviewActivitySnippet data={progression.data} server={server} /> : <LoadingInline />}
+            </Card>
+            <Card
+              title="Latest milestones"
+              className="overview-card overview-card--milestones"
+              actions={<Link to="/stats?view=milestones">View all milestones</Link>}
+            >
+              {milestones.data ? <MilestoneTimeline items={milestoneTeaserItems} server={server} /> : <LoadingInline />}
+            </Card>
+          </div>
+        </div>
+        <Card title="Recent lives" className="overview-card overview-card--recent">
           {overview.data ? <RecentPlayList items={overview.data.recent} server={server} userId={auth.user.id} /> : <LoadingInline />}
         </Card>
       </div>
-      <Card title="Latest milestones">
-        <div className="inline-meta" style={{ marginBottom: "0.65rem" }}>
-          Most recent achievements by date. <Link to="/stats?view=milestones">View all milestones</Link>
+    </div>
+  );
+}
+
+function OverviewActivitySnippet({
+  data,
+  server,
+}: {
+  data: ProgressionResponse;
+  server: User["server"];
+}) {
+  const current = data.points[data.points.length - 1] ?? null;
+  if (!current) return <EmptyState text="No monthly progression data yet." />;
+
+  return (
+    <div className="overview-activity">
+      <div className="overview-activity__header">
+        <strong>{current.label}</strong>
+        <span>{formatDateRange(current.from_date, current.to_date, server)}</span>
+      </div>
+      <div className="overview-activity__stats">
+        <div className="overview-activity__stat">
+          <span>Plays</span>
+          <strong>{current.plays}</strong>
         </div>
-        {milestones.data ? <MilestoneTimeline items={milestoneTeaserItems} server={server} /> : <LoadingInline />}
-      </Card>
+        <div className="overview-activity__stat">
+          <span>FC</span>
+          <strong>{current.fc}</strong>
+        </div>
+        <div className="overview-activity__stat">
+          <span>AP</span>
+          <strong>{current.ap}</strong>
+        </div>
+        <div className="overview-activity__stat">
+          <span>Accuracy</span>
+          <strong>{current.accuracy}%</strong>
+        </div>
+      </div>
+      <div className="overview-activity__footer">
+        <span className="toolbar-chip">Skill {data.delta_skill_score >= 0 ? "+" : ""}{data.delta_skill_score}</span>
+        <span className="toolbar-chip">Accuracy {data.delta_accuracy >= 0 ? "+" : ""}{data.delta_accuracy}%</span>
+      </div>
     </div>
   );
 }
@@ -1804,17 +1891,21 @@ function MilestonesAnalyticsView() {
 function SongsAnalyticsView() {
   const auth = useAuth();
   const [filters, setFilters] = useState<SectionFilterState>({ difficulty: "", liveType: "", includeMeta: false });
-  const [sortBy, setSortBy] = useState("play_count");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [sortBy, setSortBy] = useState<SongRankingSortKey>("play_count");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [results, setResults] = useState<Array<{ song_id: number; song_name: string }>>([]);
   const [rows, setRows] = useState<SongRankingsResponse["items"]>([]);
   const [totalRanked, setTotalRanked] = useState(0);
   const [loadingRankings, setLoadingRankings] = useState(true);
+  const [refreshingRankings, setRefreshingRankings] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const requestVersionRef = useRef(0);
-  const filterQuery = sectionFiltersToQuery(filters);
+  const filterQuery = useMemo(
+    () => sectionFiltersToQuery(filters),
+    [filters.difficulty, filters.liveType, filters.includeMeta],
+  );
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const pageSize = 50;
 
@@ -1827,7 +1918,10 @@ function SongsAnalyticsView() {
     if (!auth.user) return;
     const requestVersion = ++requestVersionRef.current;
     let cancelled = false;
-    setLoadingRankings(true);
+    const hasExistingRows = rows.length > 0;
+    setLoadingMore(false);
+    setLoadingRankings(!hasExistingRows);
+    setRefreshingRankings(hasExistingRows);
     void (async () => {
       try {
         const first = await api.getSongRankings(auth.user!.id, { ...filterQuery, sort_by: sortBy, limit: pageSize, offset: 0, sort_order: sortOrder });
@@ -1840,16 +1934,19 @@ function SongsAnalyticsView() {
           setTotalRanked(0);
         }
       } finally {
-        if (!cancelled && requestVersion === requestVersionRef.current) setLoadingRankings(false);
+        if (!cancelled && requestVersion === requestVersionRef.current) {
+          setLoadingRankings(false);
+          setRefreshingRankings(false);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [auth.user?.id, sortBy, sortOrder, filters.difficulty, filters.liveType, filters.includeMeta]);
+  }, [auth.user?.id, filterQuery, sortBy, sortOrder]);
 
   const loadMore = useCallback(async () => {
-    if (!auth.user || loadingRankings || loadingMore || rows.length >= totalRanked) return;
+    if (!auth.user || loadingRankings || refreshingRankings || loadingMore || rows.length >= totalRanked) return;
     const requestVersion = requestVersionRef.current;
     setLoadingMore(true);
     try {
@@ -1865,9 +1962,11 @@ function SongsAnalyticsView() {
     } catch {
       /* ignore */
     } finally {
-      setLoadingMore(false);
+      if (requestVersion === requestVersionRef.current) {
+        setLoadingMore(false);
+      }
     }
-  }, [auth.user, filterQuery, loadingMore, loadingRankings, rows.length, sortBy, sortOrder, totalRanked]);
+  }, [auth.user, filterQuery, loadingMore, loadingRankings, refreshingRankings, rows.length, sortBy, sortOrder, totalRanked]);
 
   useEffect(() => {
     const el = sentinelRef.current;
@@ -1900,13 +1999,12 @@ function SongsAnalyticsView() {
 
   if (!auth.user) return null;
 
-  function toggleSort(key: string) {
-    if (sortBy === key) {
-      setSortOrder((current) => (current === "asc" ? "desc" : "asc"));
-      return;
-    }
-    setSortBy(key);
-    setSortOrder("desc");
+  function toggleSort(key: SongRankingSortKey) {
+    const nextSortBy = key;
+    const nextSortOrder: SortOrder = sortBy === key ? (sortOrder === "asc" ? "desc" : "asc") : "desc";
+    setSortBy(nextSortBy);
+    setSortOrder(nextSortOrder);
+    setRows((current) => sortSongRankingRows(current, nextSortBy, nextSortOrder));
   }
 
   return (
@@ -1939,7 +2037,8 @@ function SongsAnalyticsView() {
           onSort={toggleSort}
           total={totalRanked}
           server={auth.user.server}
-          loading={loadingRankings}
+          initialLoading={loadingRankings}
+          refreshing={refreshingRankings}
         />
         <div ref={sentinelRef} style={{ height: 1 }} />
         {loadingMore && <LoadingInline />}
@@ -2752,25 +2851,67 @@ function RecentPlayList({
     all_perfect: Boolean(item.all_perfect),
     anomaly: Boolean(item.anomaly),
   }));
+  const locale = webLocale(server);
+  const formatCount = (value: number | undefined) => (typeof value === "number" && Number.isFinite(value) ? value.toLocaleString(locale) : "0");
+  const formatAccuracyValue = (value: number | undefined) =>
+    typeof value === "number" && Number.isFinite(value) ? `${value}%` : "No accuracy";
+
   return (
     <>
-      <div className="list-grid">
+      <div className="recent-lives-list">
         {items.map((item, index) => (
-          <div key={`${item.song_id}-${item.timestamp || index}`} className="list-card">
-            <CompactScreenshotCard
-              item={modalItems[index]!}
-              server={server}
-              onOpen={() => setActive(index)}
-              thumb={
-                item.image_url ? (
-                  <SecureImage path={item.image_url} alt={item.filename || `play-${index}`} className="compact-shot-thumb" variant="thumb" />
-                ) : (
-                  <div className="gallery-placeholder compact-shot-thumb">No image</div>
-                )
-              }
-            />
-            <div className="inline-meta">{formatDateTime(item.timestamp, server)}</div>
-          </div>
+          <button type="button" key={`${item.song_id}-${item.timestamp || index}`} className="recent-live-row" onClick={() => setActive(index)}>
+            <div className="recent-live-row__thumb">
+              {item.image_url ? (
+                <SecureImage path={item.image_url} alt={item.filename || `play-${index}`} className="recent-live-row__image" variant="thumb" />
+              ) : (
+                <div className="gallery-placeholder recent-live-row__image">No image</div>
+              )}
+            </div>
+            <div className="recent-live-row__main">
+              <div className="recent-live-row__header">
+                <div className="recent-live-row__title-block">
+                  <strong>{item.song_name || `Song ${item.song_id}`}</strong>
+                  <div className="inline-meta">
+                    {formatDifficulty(item.difficulty)}
+                    {item.live_type ? ` · ${formatLiveType(item.live_type)}` : ""}
+                  </div>
+                </div>
+                <div className="badge-row">
+                  {item.full_combo ? <span className="badge fc">FC</span> : null}
+                  {item.all_perfect ? <span className="badge ap">AP</span> : null}
+                  {item.anomaly ? <span className="badge warn">Anomaly</span> : null}
+                </div>
+              </div>
+              <div className="recent-live-row__stat-grid">
+                <div className="recent-live-row__stat-group">
+                  <span className="recent-live-row__label">Judgments</span>
+                  <div className="recent-live-row__pairs">
+                    <span>P {formatCount(item.perfect)}</span>
+                    <span>Gr {formatCount(item.great)}</span>
+                    <span>Go {formatCount(item.good)}</span>
+                    <span>B {formatCount(item.bad)}</span>
+                    <span>M {formatCount(item.miss)}</span>
+                  </div>
+                </div>
+                <div className="recent-live-row__stat-group">
+                  <span className="recent-live-row__label">Timing</span>
+                  <div className="recent-live-row__pairs">
+                    <span>Fast {formatCount(item.fast)}</span>
+                    <span>Slow {formatCount(item.slow)}</span>
+                  </div>
+                </div>
+                <div className="recent-live-row__stat-group recent-live-row__stat-group--summary">
+                  <span className="recent-live-row__label">Summary</span>
+                  <div className="recent-live-row__summary">
+                    <strong>{formatAccuracyValue(item.accuracy)}</strong>
+                    <span>Max combo {formatCount(item.max_combo)}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="inline-meta recent-live-row__timestamp">{formatDateTime(item.timestamp, server)}</div>
+            </div>
+          </button>
         ))}
       </div>
       {active != null && (
@@ -2787,68 +2928,80 @@ function SongRankingsTable({
   onSort,
   total,
   server,
-  loading,
+  initialLoading,
+  refreshing,
 }: {
   items: SongRankingsResponse["items"];
-  sortBy: string;
-  sortOrder: "asc" | "desc";
-  onSort: (key: string) => void;
+  sortBy: SongRankingSortKey;
+  sortOrder: SortOrder;
+  onSort: (key: SongRankingSortKey) => void;
   total: number;
   server: User["server"];
-  loading?: boolean;
+  initialLoading?: boolean;
+  refreshing?: boolean;
 }) {
-  if (loading && !items.length) return <LoadingCard label="Loading ranked songs..." />;
+  if (initialLoading && !items.length) return <LoadingCard label="Loading ranked songs..." />;
   if (!items.length) return <EmptyState text="No ranked songs found for the current filters." />;
   return (
-    <div className="table-wrap">
+    <div className={`table-wrap song-rankings-table-wrap${refreshing ? " is-refreshing" : ""}`}>
       <table className="data-table">
+        <colgroup>
+          <col className="song-rankings-col song-rankings-col--song" />
+          <col className="song-rankings-col song-rankings-col--metric" />
+          <col className="song-rankings-col song-rankings-col--metric" />
+          <col className="song-rankings-col song-rankings-col--metric" />
+          <col className="song-rankings-col song-rankings-col--metric" />
+          <col className="song-rankings-col song-rankings-col--latest" />
+        </colgroup>
         <thead>
           <tr>
-            <th>Song</th>
-            <th>
+            <th className="song-rankings-cell song-rankings-cell--song">Song</th>
+            <th className="song-rankings-cell song-rankings-cell--metric">
               <button type="button" className="th-sort" onClick={() => onSort("play_count")}>
                 <span className="th-sort__label">Plays</span>
                 <span className="th-sort__arrow">{sortBy === "play_count" ? (sortOrder === "asc" ? "▲" : "▼") : ""}</span>
               </button>
             </th>
-            <th>
+            <th className="song-rankings-cell song-rankings-cell--metric">
               <button type="button" className="th-sort" onClick={() => onSort("fc_count")}>
                 <span className="th-sort__label">FC</span>
                 <span className="th-sort__arrow">{sortBy === "fc_count" ? (sortOrder === "asc" ? "▲" : "▼") : ""}</span>
               </button>
             </th>
-            <th>
+            <th className="song-rankings-cell song-rankings-cell--metric">
               <button type="button" className="th-sort" onClick={() => onSort("ap_count")}>
                 <span className="th-sort__label">AP</span>
                 <span className="th-sort__arrow">{sortBy === "ap_count" ? (sortOrder === "asc" ? "▲" : "▼") : ""}</span>
               </button>
             </th>
-            <th>
+            <th className="song-rankings-cell song-rankings-cell--metric">
               <button type="button" className="th-sort" onClick={() => onSort("skill_score")}>
                 <span className="th-sort__label">Skill</span>
                 <span className="th-sort__arrow">{sortBy === "skill_score" ? (sortOrder === "asc" ? "▲" : "▼") : ""}</span>
               </button>
             </th>
-            <th>Latest</th>
+            <th className="song-rankings-cell song-rankings-cell--latest">Latest</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item) => (
             <tr key={item.song_id}>
-              <td>
-                <Link to={`/stats/song/${item.song_id}`}>{item.song_name || `Song #${item.song_id}`}</Link>
+              <td className="song-rankings-cell song-rankings-cell--song">
+                <Link to={`/stats/song/${item.song_id}`} className="song-rankings-link">
+                  {item.song_name || `Song #${item.song_id}`}
+                </Link>
               </td>
-              <td>{item.play_count}</td>
-              <td>{item.fc_count}</td>
-              <td>{item.ap_count}</td>
-              <td>{item.skill_score}</td>
-              <td>{formatShortDate(item.latest_play?.timestamp, server)}</td>
+              <td className="song-rankings-cell song-rankings-cell--metric">{item.play_count}</td>
+              <td className="song-rankings-cell song-rankings-cell--metric">{item.fc_count}</td>
+              <td className="song-rankings-cell song-rankings-cell--metric">{item.ap_count}</td>
+              <td className="song-rankings-cell song-rankings-cell--metric">{item.skill_score}</td>
+              <td className="song-rankings-cell song-rankings-cell--latest">{formatShortDate(item.latest_play?.timestamp, server)}</td>
             </tr>
           ))}
         </tbody>
       </table>
       <div className="inline-meta">Loaded {items.length} of {total}</div>
-      {loading ? <div className="inline-meta">Refreshing rankings...</div> : null}
+      {refreshing ? <div className="inline-meta">Refreshing rankings...</div> : null}
     </div>
   );
 }

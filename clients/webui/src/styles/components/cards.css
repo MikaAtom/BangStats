@@ -8,6 +8,7 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
+  min-width: 0;
 }
 
 .card,
@@ -167,6 +168,189 @@
   align-items: start;
 }
 
+.overview-card {
+  min-width: 0;
+}
+
+.overview-card--chart .card-header,
+.overview-card--recent .card-header,
+.overview-card--activity .card-header,
+.overview-card--milestones .card-header {
+  margin-bottom: var(--space-3);
+}
+
+.overview-activity {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.overview-activity__header {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.overview-activity__header strong {
+  font-size: var(--text-lg);
+}
+
+.overview-activity__header span {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.overview-activity__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.overview-activity__stat {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+
+.overview-activity__stat span {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.overview-activity__stat strong {
+  font-size: var(--text-lg);
+}
+
+.overview-activity__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.recent-lives-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.recent-live-row {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  padding: var(--space-3);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  appearance: none;
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: var(--space-3);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.recent-live-row:hover {
+  border-color: var(--border-purple);
+  background: rgba(124, 92, 255, 0.08);
+}
+
+.recent-live-row__thumb {
+  width: 88px;
+}
+
+.recent-live-row__image {
+  width: 88px;
+  height: 88px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+.recent-live-row__main {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.recent-live-row__header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.recent-live-row__title-block {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.recent-live-row__title-block strong {
+  font-size: var(--text-base);
+  overflow-wrap: anywhere;
+}
+
+.recent-live-row__stat-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(140px, 1fr) minmax(140px, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.recent-live-row__stat-group {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.recent-live-row__label {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.recent-live-row__pairs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.recent-live-row__pairs span,
+.recent-live-row__summary span,
+.recent-live-row__summary strong {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+}
+
+.recent-live-row__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.recent-live-row__summary strong {
+  font-size: var(--text-base);
+}
+
+.recent-live-row__timestamp {
+  margin-top: calc(var(--space-1) * -1);
+}
+
+.overview-card--milestones .timeline {
+  gap: var(--space-3);
+}
+
+.overview-card--milestones .timeline-content {
+  padding-bottom: var(--space-3);
+}
+
 /* Loading Card */
 .loading-card {
   padding: var(--space-4);
@@ -219,6 +403,25 @@
   }
 
   .milestone-row {
+    grid-template-columns: 1fr;
+  }
+
+  .recent-live-row,
+  .recent-live-row__stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .recent-live-row__thumb {
+    width: 100%;
+  }
+
+  .recent-live-row__image {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+  }
+
+  .overview-activity__stats {
     grid-template-columns: 1fr;
   }
 }
