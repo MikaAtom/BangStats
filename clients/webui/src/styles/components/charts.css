@@ -120,7 +120,7 @@
 
 .trend-chart-overview__plot {
   width: 100%;
-  min-height: 280px;
+  min-height: 320px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background:
@@ -131,7 +131,7 @@
 
 .trend-chart--overview {
   width: 100%;
-  height: 280px;
+  height: 320px;
   display: block;
   background: transparent;
   border: none;
@@ -418,8 +418,8 @@
 
   .trend-chart-overview__plot,
   .trend-chart--overview {
-    min-height: 240px;
-    height: 240px;
+    min-height: 280px;
+    height: 280px;
   }
 
   .trend-chart-overview__meta {
