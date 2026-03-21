@@ -28,6 +28,15 @@ function overlaps(a: LabelRect, b: LabelRect) {
   return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
 }
 
+function expandRect(rect: LabelRect, dx: number, dy: number): LabelRect {
+  return {
+    left: rect.left - dx,
+    right: rect.right + dx,
+    top: rect.top - dy,
+    bottom: rect.bottom + dy,
+  };
+}
+
 export function TrendChart({ data, variant = "default", server = "en" }: TrendChartProps) {
   if (!data.points.length) {
     return <div className="empty-state">No progression points in this range — try another scope or filters.</div>;
@@ -35,11 +44,11 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
 
   const n = data.points.length;
   const vbW = 100;
-  const vbH = variant === "overview" ? 76 : 44;
-  const padLeft = variant === "overview" ? 8 : 6;
-  const padRight = variant === "overview" ? 8 : 6;
-  const padTop = variant === "overview" ? 14 : 7;
-  const padBottom = variant === "overview" ? 18 : 7;
+  const vbH = variant === "overview" ? 82 : 44;
+  const padLeft = variant === "overview" ? 9 : 6;
+  const padRight = variant === "overview" ? 9 : 6;
+  const padTop = variant === "overview" ? 16 : 7;
+  const padBottom = variant === "overview" ? 19 : 7;
   const innerW = vbW - padLeft - padRight;
   const innerH = vbH - padTop - padBottom;
 
@@ -65,46 +74,53 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
       isValley,
     };
   });
+  const clampLabelLeft = (left: number, width: number) => Math.min(Math.max(left, 1.2), vbW - 1.2 - width);
+  const dotRects = points.map((point) => expandRect({ left: point.x - 1.9, right: point.x + 1.9, top: point.y - 1.9, bottom: point.y + 1.9 }, 0.8, 0.8));
 
-  const clampCenterX = (x: number, width: number) => Math.min(Math.max(x, padLeft + width / 2), vbW - padRight - width / 2);
   const pointLabelRects: LabelRect[] = [];
-  const pointLabels = points.map((point) => {
+  const pointLabels = points.map((point, index) => {
     const text = String(point.skill_score);
-    const width = Math.max(8.8, text.length * 1.95);
-    const height = 5.2;
-    const candidateYs = point.isValley ? [point.y + 5.8, point.y - 4.8] : [point.y - 4.8, point.y + 5.8];
-    for (const y of candidateYs) {
-      const x = clampCenterX(point.x, width);
+    const width = Math.max(8.8, text.length * 1.9);
+    const height = 5.1;
+    const anchor = (index === 0 ? "start" : index === n - 1 ? "end" : "middle") as "start" | "middle" | "end";
+    const desiredLeft =
+      anchor === "start" ? point.x + 0.5 : anchor === "end" ? point.x - width - 0.5 : point.x - width / 2;
+    const left = clampLabelLeft(desiredLeft, width);
+    const x = anchor === "start" ? left : anchor === "end" ? left + width : left + width / 2;
+    const candidateYs = point.isValley ? [point.y + 6.2, point.y - 4.8] : [point.y - 4.8, point.y + 6.2];
+
+    for (const baselineY of candidateYs) {
       const rect = {
-        left: x - width / 2,
-        right: x + width / 2,
-        top: y - height + 0.4,
-        bottom: y + 0.4,
+        left,
+        right: left + width,
+        top: baselineY - height + 0.35,
+        bottom: baselineY + 0.35,
       };
-      const inside = rect.top >= padTop - 8 && rect.bottom <= vbH - padBottom - 0.4;
-      if (inside && pointLabelRects.every((other) => !overlaps(rect, other))) {
+      const inside = rect.top >= 1.2 && rect.bottom <= vbH - padBottom - 2.2;
+      const blocked =
+        pointLabelRects.some((other) => overlaps(expandRect(rect, 0.5, 0.25), other)) ||
+        dotRects.some((other) => overlaps(expandRect(rect, 0.2, 0.2), other));
+      if (inside && !blocked) {
         pointLabelRects.push(rect);
-        return { x, y, text };
+        return { x, y: baselineY, anchor, text };
       }
     }
-    const fallbackX = clampCenterX(point.x, width);
-    const fallbackY = Math.max(point.y - 4.8, padTop + 1.4);
+
+    const fallbackY = Math.max(point.y - 4.8, 3.8);
     const fallbackRect = {
-      left: fallbackX - width / 2,
-      right: fallbackX + width / 2,
-      top: fallbackY - height + 0.4,
-      bottom: fallbackY + 0.4,
+      left,
+      right: left + width,
+      top: fallbackY - height + 0.35,
+      bottom: fallbackY + 0.35,
     };
     pointLabelRects.push(fallbackRect);
-    return { x: fallbackX, y: fallbackY, text };
+    return { x, y: fallbackY, anchor, text };
   });
 
   const axisLabels = points.map((point) => {
-    const width = Math.max(7.6, point.axisLabel.length * 1.35);
-    return {
-      ...point,
-      axisX: clampCenterX(point.x, width),
-    };
+    const width = Math.max(8.2, point.axisLabel.length * 1.35);
+    const left = clampLabelLeft(point.x - width / 2, width);
+    return { x: left + width / 2, label: point.axisLabel };
   });
 
   const deltaRects: LabelRect[] = [];
@@ -114,41 +130,52 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
       const next = points[index + 1]!;
       const delta = Number((next.skill_score - point.skill_score).toFixed(2));
       const label = `${delta >= 0 ? "+" : ""}${delta.toFixed(2)}`;
-      const width = Math.max(7.8, label.length * 1.55);
-      const height = 4.2;
+      const width = Math.max(7.2, label.length * 1.5);
+      const height = 4;
       const midX = (point.x + next.x) / 2;
       const midY = (point.y + next.y) / 2;
       const dx = next.x - point.x;
       const dy = next.y - point.y;
       const length = Math.hypot(dx, dy) || 1;
-      const normalX = (-dy / length) * 4.4;
-      const normalY = (dx / length) * 4.4;
-      const candidates = [
-        { x: midX + normalX, y: midY + normalY },
-        { x: midX - normalX, y: midY - normalY },
-        { x: midX, y: midY - 5.2 },
-        { x: midX, y: midY + 5.2 },
-      ];
+      const normalX = -dy / length;
+      const normalY = dx / length;
+      const candidateOffsets = [6.6, 8.4];
+      const signedSides = [
+        { sx: normalX, sy: normalY },
+        { sx: -normalX, sy: -normalY },
+      ].sort((a, b) => {
+        const aY = midY + a.sy * candidateOffsets[0]!;
+        const bY = midY + b.sy * candidateOffsets[0]!;
+        const aRoom = Math.min(aY - 2, vbH - padBottom - 3 - aY);
+        const bRoom = Math.min(bY - 2, vbH - padBottom - 3 - bY);
+        return bRoom - aRoom;
+      });
 
-      for (const candidate of candidates) {
-        const x = clampCenterX(candidate.x, width);
-        const rect = {
-          left: x - width / 2,
-          right: x + width / 2,
-          top: candidate.y - height + 0.2,
-          bottom: candidate.y + 0.2,
-        };
-        const inside = rect.top >= padTop - 6 && rect.bottom <= vbH - padBottom - 3.2;
-        const blocked =
-          pointLabelRects.some((other) => overlaps(rect, other)) || deltaRects.some((other) => overlaps(rect, other));
-        if (inside && !blocked) {
-          deltaRects.push(rect);
-          return {
-            key: `${point.label}-${next.label}`,
-            x,
-            y: candidate.y,
-            label,
+      for (const side of signedSides) {
+        for (const offset of candidateOffsets) {
+          const cx = midX + side.sx * offset;
+          const cy = midY + side.sy * offset;
+          const left = clampLabelLeft(cx - width / 2, width);
+          const rect = {
+            left,
+            right: left + width,
+            top: cy - height + 0.25,
+            bottom: cy + 0.25,
           };
+          const inside = rect.top >= 2 && rect.bottom <= vbH - padBottom - 3.2;
+          const blocked =
+            pointLabelRects.some((other) => overlaps(expandRect(rect, 0.4, 0.2), other)) ||
+            deltaRects.some((other) => overlaps(expandRect(rect, 0.4, 0.2), other)) ||
+            dotRects.some((other) => overlaps(expandRect(rect, 0.3, 0.2), other));
+          if (inside && !blocked) {
+            deltaRects.push(rect);
+            return {
+              key: `${point.label}-${next.label}`,
+              x: left + width / 2,
+              y: cy,
+              label,
+            };
+          }
         }
       }
       return null;
@@ -194,14 +221,14 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
                 <text
                   x={pointLabels[index]!.x}
                   y={pointLabels[index]!.y}
-                  textAnchor="middle"
+                  textAnchor={pointLabels[index]!.anchor}
                   className="trend-skill-label"
                 >
                   {point.skill_score}
                 </text>
                 <circle cx={point.x} cy={point.y} r="1.8" className="trend-dot" vectorEffect="non-scaling-stroke" />
-                <text x={axisLabels[index]!.axisX} y={vbH - 6.2} textAnchor="middle" className="trend-axis-tick">
-                  {point.axisLabel}
+                <text x={axisLabels[index]!.x} y={vbH - 6.2} textAnchor="middle" className="trend-axis-tick">
+                  {axisLabels[index]!.label}
                 </text>
               </g>
             ))}
