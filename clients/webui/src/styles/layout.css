@@ -189,6 +189,34 @@
   align-items: start;
 }
 
+.analytics-control-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 1.15fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.analytics-control-rail__cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.analytics-control-rail__cluster > .field,
+.analytics-control-rail__cluster > .button-row {
+  min-width: 0;
+}
+
+.analytics-control-rail__cluster .field.inline-field {
+  max-width: none;
+  flex: 1 1 190px;
+}
+
+.analytics-control-rail__cluster--end {
+  justify-content: flex-end;
+}
+
 .song-search-field {
   min-width: min(460px, 100%);
   flex: 1 1 340px;
@@ -270,5 +298,9 @@
 
   .sidebar {
     padding: var(--space-4) var(--space-3);
+  }
+
+  .analytics-control-rail {
+    grid-template-columns: 1fr;
   }
 }

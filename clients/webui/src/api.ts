@@ -988,10 +988,14 @@ class ApiClient {
     return this.request<SongStatsResponse>(`/api/users/${userId}/stats/songs/${songId}${query}`);
   }
 
-  getSongRankings(userId: number, params: { sort_by?: string; limit?: number; offset?: number } & AnalyticsFilterQuery = {}) {
+  getSongRankings(
+    userId: number,
+    params: { sort_by?: string; sort_order?: "asc" | "desc"; limit?: number; offset?: number } & AnalyticsFilterQuery = {},
+  ) {
     const query = new URLSearchParams();
     appendAnalyticsFilters(query, params);
     if (params.sort_by) query.set("sort_by", params.sort_by);
+    if (params.sort_order) query.set("sort_order", params.sort_order);
     if (params.limit != null) query.set("limit", String(params.limit));
     if (params.offset != null && params.offset > 0) query.set("offset", String(params.offset));
     return this.request<SongRankingsResponse>(`/api/users/${userId}/stats/songs/rankings?${query.toString()}`);
@@ -1009,15 +1013,21 @@ class ApiClient {
     return this.request<ActivityResponse>(`/api/users/${userId}/stats/activity?${query.toString()}`);
   }
 
-  getCalendar(userId: number, year: number, month: number, filters: AnalyticsFilterQuery = {}) {
+  getCalendar(userId: number, year: number, month: number, filters: AnalyticsFilterQuery = {}, songId?: number) {
     const query = new URLSearchParams({ year: String(year), month: String(month) });
     appendAnalyticsFilters(query, filters);
+    if (typeof songId === "number" && Number.isFinite(songId) && songId > 0) {
+      query.set("song_id", String(Math.trunc(songId)));
+    }
     return this.request<CalendarResponse>(`/api/users/${userId}/stats/calendar?${query.toString()}`);
   }
 
-  getCalendarYear(userId: number, year: number, filters: AnalyticsFilterQuery = {}) {
+  getCalendarYear(userId: number, year: number, filters: AnalyticsFilterQuery = {}, songId?: number) {
     const query = new URLSearchParams({ year: String(year) });
     appendAnalyticsFilters(query, filters);
+    if (typeof songId === "number" && Number.isFinite(songId) && songId > 0) {
+      query.set("song_id", String(Math.trunc(songId)));
+    }
     return this.request<CalendarYearResponse>(`/api/users/${userId}/stats/calendar/year?${query.toString()}`);
   }
 

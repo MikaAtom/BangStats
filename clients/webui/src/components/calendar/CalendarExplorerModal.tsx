@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { CalendarResponse, CalendarYearResponse, ScreenshotItem, User } from "../../api";
+import type { ScreenshotListResponse } from "../../api";
+import type { Loadable } from "../../hooks/useLoadable";
 import { formatDateTime, formatDifficulty, formatLiveType, formatShortDate, webLocale } from "../../utils/format";
 import { CalendarHeatmap } from "../charts/CalendarHeatmap";
 import { EmptyState } from "../ui/EmptyState";
@@ -14,6 +16,14 @@ function dateKey(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function parseDateKey(value: string) {
+  const [year, month, day] = value.split("-").map((part) => Number(part));
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return new Date();
+  }
+  return new Date(year, month - 1, day);
 }
 
 export function stepCalendarAnchor(mode: CalendarExplorerMode, anchor: Date, direction: -1 | 1) {
@@ -99,9 +109,9 @@ export function CalendarExplorerModal({
   onModeChange,
   onAnchorDateChange,
   onClose,
-  yearData,
-  monthData,
-  shots,
+  yearState,
+  monthState,
+  shotsState,
 }: {
   open: boolean;
   title: string;
@@ -112,22 +122,29 @@ export function CalendarExplorerModal({
   onModeChange: (mode: CalendarExplorerMode) => void;
   onAnchorDateChange: (next: Date) => void;
   onClose: () => void;
-  yearData?: CalendarYearResponse | null;
-  monthData?: CalendarResponse | null;
-  shots?: ScreenshotItem[] | null;
+  yearState: Loadable<CalendarYearResponse> & { reload: () => Promise<void> };
+  monthState: Loadable<CalendarResponse> & { reload: () => Promise<void> };
+  shotsState: Loadable<ScreenshotListResponse> & { reload: () => Promise<void> };
 }) {
   const [selectedShotId, setSelectedShotId] = useState<number | null>(null);
-  const shotsLoading = shots == null;
+  useEffect(() => {
+    if (!open) setSelectedShotId(null);
+  }, [open]);
+
   const orderedShots = useMemo(
     () =>
-      (shots || [])
-        .slice()
-        .sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || ""))),
-    [shots],
+      mode === "year" || shotsState.loading || shotsState.error
+        ? []
+        : (shotsState.data?.items || [])
+            .slice()
+            .sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || ""))),
+    [mode, shotsState.data, shotsState.loading, shotsState.error],
   );
   const groupedShots = useMemo(() => groupShotsByDate(orderedShots), [orderedShots]);
   const activeShot = orderedShots.find((shot) => shot.id === selectedShotId) || orderedShots[0] || null;
   const rangeLabel = calendarLabel(mode, anchorDate, server);
+  const yearData = yearState.data;
+  const yearBase = yearData ? Math.max(...yearData.months.map((item) => item.plays), 1) : 1;
 
   useEffect(() => {
     if (!orderedShots.length) {
@@ -177,12 +194,20 @@ export function CalendarExplorerModal({
 
         <div className="calendar-modal__layout">
           <div className="calendar-modal__browser">
-            {mode === "year" && yearData ? (
+            {mode === "year" && yearState.loading ? (
+              <LoadingInline />
+            ) : mode === "year" && yearState.error ? (
+              <div className="stack">
+                <EmptyState text={`Could not load yearly calendar: ${yearState.error}`} />
+                <button className="button ghost" type="button" onClick={() => void yearState.reload()}>
+                  Retry
+                </button>
+              </div>
+            ) : mode === "year" && yearData ? (
               <div className="calendar-modal__year-grid">
                 {yearData.months.map((month) => {
                   const intensity = Math.max(month.plays, month.fc, month.ap, month.active_days, 1);
-                  const base = Math.max(...yearData.months.map((item) => item.plays), 1);
-                  const alpha = 0.16 + (intensity / base) * 0.84;
+                  const alpha = 0.16 + (intensity / yearBase) * 0.84;
                   return (
                     <button
                       key={month.month}
@@ -203,62 +228,40 @@ export function CalendarExplorerModal({
                   );
                 })}
               </div>
-            ) : mode === "year" ? (
-              <LoadingInline />
             ) : null}
 
-            {mode === "month" && monthData ? (
+            {mode === "month" && monthState.loading ? (
+              <LoadingInline />
+            ) : mode === "month" && monthState.error ? (
+              <div className="stack">
+                <EmptyState text={`Could not load monthly calendar: ${monthState.error}`} />
+                <button className="button ghost" type="button" onClick={() => void monthState.reload()}>
+                  Retry
+                </button>
+              </div>
+            ) : mode === "month" && monthState.data ? (
               <div className="stack">
                 <CalendarHeatmap
-                  data={monthData}
+                  data={monthState.data}
                   onDayClick={(isoDate) => {
-                    onAnchorDateChange(new Date(isoDate));
+                    onAnchorDateChange(parseDateKey(isoDate));
                     onModeChange("day");
                   }}
                 />
-                {groupedShots.length > 0 ? (
-                  <div className="calendar-modal__groups">
-                    {groupedShots.map((group) => (
-                      <div className="calendar-modal__group" key={group.date}>
-                        <div className="calendar-modal__group-head">
-                          <strong>{formatShortDate(group.date, server)}</strong>
-                          <span>{group.shots.length} screenshots</span>
-                        </div>
-                        <div className="calendar-modal__shot-list">
-                          {group.shots.map((shot) => (
-                            <button
-                              key={shot.id}
-                              type="button"
-                              className={selectedShotId === shot.id ? "calendar-modal__shot active" : "calendar-modal__shot"}
-                              onClick={() => setSelectedShotId(shot.id)}
-                            >
-                              <div className="calendar-modal__shot-thumb">
-                                {shot.image_available && shot.image_url ? (
-                                  <SecureImage path={shot.image_url} alt={shot.filename || shot.song_name || `screenshot-${shot.id}`} className="calendar-modal__shot-image" />
-                                ) : (
-                                  <div className="gallery-placeholder calendar-modal__shot-placeholder">No image</div>
-                                )}
-                              </div>
-                              <div className="calendar-modal__shot-body">
-                                <strong>{shot.song_name || `Song ${shot.song_id}`}</strong>
-                                <span>
-                                  {formatDifficulty(shot.difficulty)} · {formatLiveType(shot.live_type)}
-                                </span>
-                                <small>{formatDateTime(shot.timestamp, server)}</small>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
+                <div className="inline-meta">Select a day to zoom into its screenshots.</div>
               </div>
-            ) : mode === "month" ? (
-              <LoadingInline />
             ) : null}
 
-            {(mode === "week" || mode === "day") && groupedShots.length > 0 ? (
+            {(mode === "week" || mode === "day") && shotsState.loading ? (
+              <LoadingInline />
+            ) : (mode === "week" || mode === "day") && shotsState.error ? (
+              <div className="stack">
+                <EmptyState text={`Could not load screenshots: ${shotsState.error}`} />
+                <button className="button ghost" type="button" onClick={() => void shotsState.reload()}>
+                  Retry
+                </button>
+              </div>
+            ) : (mode === "week" || mode === "day") && groupedShots.length > 0 ? (
               <div className="calendar-modal__groups">
                 {groupedShots.map((group) => (
                   <div className="calendar-modal__group" key={group.date}>
@@ -267,7 +270,7 @@ export function CalendarExplorerModal({
                         type="button"
                         className="calendar-modal__group-button"
                         onClick={() => {
-                          onAnchorDateChange(new Date(group.date));
+                          onAnchorDateChange(parseDateKey(group.date));
                           onModeChange("day");
                         }}
                       >
@@ -305,13 +308,7 @@ export function CalendarExplorerModal({
               </div>
             ) : null}
 
-            {!orderedShots.length && mode !== "year" ? (
-              shotsLoading ? (
-                <LoadingInline />
-              ) : (
-                <EmptyState text="No screenshots found for this range." />
-              )
-            ) : null}
+            {!orderedShots.length && mode !== "year" && !shotsState.loading ? <EmptyState text="No screenshots found for this range." /> : null}
           </div>
 
           <div className="calendar-modal__detail">
@@ -340,7 +337,7 @@ export function CalendarExplorerModal({
                 )}
                 <ResultStatGrid item={activeShot} server={server} showMetaFooter />
               </div>
-            ) : shotsLoading ? (
+            ) : shotsState.loading ? (
               <LoadingInline />
             ) : (
               <EmptyState text="Pick a screenshot to inspect its full stats." />

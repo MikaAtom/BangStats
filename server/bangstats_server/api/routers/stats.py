@@ -184,6 +184,7 @@ def _filtered_user_screenshots(
     user_id: int,
     current_user: User,
     *,
+    song_id: int | None = None,
     difficulty: str | None = None,
     live_type: str | None = None,
     include_meta: bool = False,
@@ -196,6 +197,8 @@ def _filtered_user_screenshots(
             filtered,
             excluded_song_ids=set(context["effective_song_ids"]),
         )
+    if song_id is not None and int(song_id) > 0:
+        filtered = [item for item in filtered if int(getattr(item, "song_id", 0)) == int(song_id)]
     filtered = filter_stats_plays(filtered, difficulty=difficulty, live_type=live_type)
     return filtered, context
 
@@ -407,6 +410,7 @@ def get_user_song_rankings(
     live_type: str | None = Query(None),
     include_meta: bool = Query(False),
     sort_by: str = Query("play_count"),
+    sort_order: str = Query("desc"),
     offset: int = Query(0, ge=0, le=500_000),
     limit: int = Query(25, ge=1, le=100),
     current_user: User = Depends(get_current_user),
@@ -427,6 +431,7 @@ def get_user_song_rankings(
         screenshots,
         song_names=song_names,
         sort_by=sort_by,
+        sort_order=sort_order,
         limit=limit,
         offset=offset,
     )
@@ -586,6 +591,7 @@ def get_user_stats_calendar(
     user_id: int,
     year: int | None = Query(None, ge=2000, le=2200),
     month: int | None = Query(None, ge=1, le=12),
+    song_id: int | None = Query(None, ge=1),
     difficulty: str | None = Query(None),
     live_type: str | None = Query(None),
     include_meta: bool = Query(False),
@@ -595,6 +601,7 @@ def get_user_stats_calendar(
     screenshots, _ = _filtered_user_screenshots(
         user_id,
         current_user,
+        song_id=song_id,
         difficulty=difficulty,
         live_type=live_type,
         include_meta=include_meta,
@@ -617,6 +624,7 @@ def get_user_stats_calendar(
 def get_user_stats_calendar_year(
     user_id: int,
     year: int = Query(..., ge=2000, le=2200),
+    song_id: int | None = Query(None, ge=1),
     difficulty: str | None = Query(None),
     live_type: str | None = Query(None),
     include_meta: bool = Query(False),
@@ -626,6 +634,7 @@ def get_user_stats_calendar_year(
     screenshots, _ = _filtered_user_screenshots(
         user_id,
         current_user,
+        song_id=song_id,
         difficulty=difficulty,
         live_type=live_type,
         include_meta=include_meta,

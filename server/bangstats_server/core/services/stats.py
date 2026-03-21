@@ -128,6 +128,7 @@ def compute_song_rankings(
     *,
     song_names: Dict[int, str] | None = None,
     sort_by: str = "play_count",
+    sort_order: str = "desc",
     limit: int = 25,
     offset: int = 0,
 ) -> tuple[List[Dict[str, Any]], int]:
@@ -159,7 +160,8 @@ def compute_song_rankings(
         "ap_count": lambda item: (int(item["ap_count"]), int(item["play_count"])),
     }
     key_fn = sort_key_map.get(sort_by, sort_key_map["play_count"])
-    ordered_rows = sorted(rows, key=key_fn, reverse=True)
+    reverse = str(sort_order).strip().lower() != "asc"
+    ordered_rows = sorted(rows, key=key_fn, reverse=reverse)
     total = len(ordered_rows)
     start = max(0, int(offset))
     end = start + max(1, int(limit))
