@@ -284,7 +284,6 @@ function MonthWallCalendar({
 export function CalendarExplorerModal({
   open,
   title,
-  subtitle,
   server,
   mode,
   anchorDate,
@@ -296,11 +295,12 @@ export function CalendarExplorerModal({
   shotsState,
   eventRange = null,
   headerCenter = null,
+  secondaryControls = null,
+  secondaryControlsCount = 0,
   variant = "modal",
 }: {
   open: boolean;
   title: string;
-  subtitle?: ReactNode;
   server: User["server"];
   mode: CalendarExplorerMode;
   anchorDate: Date;
@@ -312,9 +312,12 @@ export function CalendarExplorerModal({
   shotsState: Loadable<ScreenshotListResponse> & { reload: () => Promise<void> };
   eventRange?: { from_date: string; to_date: string } | null;
   headerCenter?: ReactNode;
+  secondaryControls?: ReactNode;
+  secondaryControlsCount?: number;
   variant?: "modal" | "inline";
 }) {
   const [shotModalIndex, setShotModalIndex] = useState<number | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     if (!open) setShotModalIndex(null);
@@ -343,6 +346,7 @@ export function CalendarExplorerModal({
   const showShotError = !shotsIdle && Boolean(shotsState.error);
   const showHourGrid = !shotsIdle && !shotsState.error && orderedShots.length > 0;
   const showShotEmpty = !shotsIdle && !shotsState.loading && !shotsState.error && orderedShots.length === 0;
+  const metaLine = [rangeLabel, !shotsIdle && orderedShots.length ? `${orderedShots.length} screenshots` : null].filter(Boolean).join(" · ");
 
   if (!open) return null;
 
@@ -354,47 +358,58 @@ export function CalendarExplorerModal({
       onClick={isInline ? undefined : (event) => event.stopPropagation()}
     >
       <div className="modal-header calendar-modal__header">
-        <div>
+        <div className="calendar-modal__toprow">
+          <div className="calendar-modal__heading">
           <h3>{title}</h3>
-          <div className="inline-meta">
-            {subtitle || rangeLabel}
-            {!shotsIdle && orderedShots.length ? ` · ${orderedShots.length} screenshots` : ""}
+            <div className="inline-meta">{metaLine}</div>
+          </div>
+          <div className="calendar-modal__toolbar">
+            <div className="calendar-modal__mode">
+              <span className="calendar-modal__mode-label">Mode</span>
+              <select value={mode} onChange={(event) => onModeChange(event.target.value as CalendarExplorerMode)}>
+                <option value="year">Year</option>
+                <option value="month">Month</option>
+                <option value="week">Week</option>
+                <option value="day">Day</option>
+                <option value="event">Event</option>
+              </select>
+            </div>
+            <div className="calendar-modal__nav">
+              <button
+                className="button ghost"
+                type="button"
+                disabled={mode === "event"}
+                onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, -1))}
+              >
+                Prev
+              </button>
+              <button
+                className="button ghost"
+                type="button"
+                disabled={mode === "event"}
+                onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, 1))}
+              >
+                Next
+              </button>
+            </div>
+            <div className="calendar-modal__focus">{headerCenter}</div>
+            {secondaryControls ? (
+              <button className="button ghost calendar-modal__filter-toggle" type="button" onClick={() => setFiltersOpen((current) => !current)}>
+                Filters{secondaryControlsCount > 0 ? ` (${secondaryControlsCount})` : ""}
+              </button>
+            ) : null}
+            {isInline ? null : (
+              <button className="button ghost" type="button" onClick={onClose}>
+                Close
+              </button>
+            )}
           </div>
         </div>
-        <div className="button-row tight calendar-modal__toolbar">
-          <div className="calendar-modal__mode">
-            <span className="calendar-modal__mode-label">Mode</span>
-            <select value={mode} onChange={(event) => onModeChange(event.target.value as CalendarExplorerMode)}>
-              <option value="year">Year</option>
-              <option value="month">Month</option>
-              <option value="week">Week</option>
-              <option value="day">Day</option>
-              <option value="event">Event</option>
-            </select>
+        {secondaryControls && filtersOpen ? (
+          <div className="calendar-modal__filters">
+            <div className="analytics-filter-row">{secondaryControls}</div>
           </div>
-          <button
-            className="button ghost"
-            type="button"
-            disabled={mode === "event"}
-            onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, -1))}
-          >
-            Prev
-          </button>
-          <div className="calendar-modal__focus">{headerCenter}</div>
-          <button
-            className="button ghost"
-            type="button"
-            disabled={mode === "event"}
-            onClick={() => onAnchorDateChange(stepCalendarAnchor(mode, anchorDate, 1))}
-          >
-            Next
-          </button>
-          {isInline ? null : (
-            <button className="button ghost" type="button" onClick={onClose}>
-              Close
-            </button>
-          )}
-        </div>
+        ) : null}
       </div>
 
       <div className="calendar-modal__layout">

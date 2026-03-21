@@ -15,9 +15,13 @@ export function SearchableSelect({
   options,
   emptyText = "No matches found.",
   loading = false,
+  loadingMore = false,
   disabled = false,
+  hasMore = false,
   onSearchTextChange,
   onChange,
+  onReachEnd,
+  onOpenChange,
   className = "",
 }: {
   label?: string;
@@ -27,15 +31,20 @@ export function SearchableSelect({
   options: SearchableSelectOption[];
   emptyText?: string;
   loading?: boolean;
+  loadingMore?: boolean;
   disabled?: boolean;
+  hasMore?: boolean;
   onSearchTextChange: (value: string) => void;
   onChange: (option: SearchableSelectOption | null) => void;
+  onReachEnd?: () => void;
+  onOpenChange?: (open: boolean) => void;
   className?: string;
 }) {
   const fieldId = useId();
   const listboxId = `${fieldId}-listbox`;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const optionsRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -62,11 +71,32 @@ export function SearchableSelect({
   }, [open]);
 
   useEffect(() => {
+    onOpenChange?.(open);
+  }, [open, onOpenChange]);
+
+  useEffect(() => {
     setActiveIndex((current) => {
       if (filteredOptions.length === 0) return 0;
       return Math.min(current, filteredOptions.length - 1);
     });
   }, [filteredOptions.length]);
+
+  useEffect(() => {
+    const node = optionsRef.current;
+    const handleReachEnd = onReachEnd;
+    if (!node || !open || !handleReachEnd) return;
+    const currentNode = node;
+    const reachEnd = handleReachEnd;
+
+    function handleScroll() {
+      if (!hasMore || loading || loadingMore) return;
+      const remaining = currentNode.scrollHeight - currentNode.scrollTop - currentNode.clientHeight;
+      if (remaining < 48) reachEnd();
+    }
+
+    currentNode.addEventListener("scroll", handleScroll);
+    return () => currentNode.removeEventListener("scroll", handleScroll);
+  }, [open, hasMore, loading, loadingMore, onReachEnd, filteredOptions.length]);
 
   function commit(option: SearchableSelectOption | null) {
     onChange(option);
@@ -150,7 +180,7 @@ export function SearchableSelect({
           {loading ? <div className="searchable-select__empty">Loading…</div> : null}
           {!loading && filteredOptions.length === 0 ? <div className="searchable-select__empty">{emptyText}</div> : null}
           {!loading && filteredOptions.length > 0 ? (
-            <div className="searchable-select__options">
+            <div ref={optionsRef} className="searchable-select__options">
               {filteredOptions.map((option, index) => (
                 <button
                   key={option.value}
@@ -167,6 +197,8 @@ export function SearchableSelect({
                   {option.meta ? <span className="searchable-select__option-meta">{option.meta}</span> : null}
                 </button>
               ))}
+              {loadingMore ? <div className="searchable-select__loading-more">Loading more…</div> : null}
+              {!loadingMore && hasMore ? <div className="searchable-select__loading-more">Scroll for more</div> : null}
             </div>
           ) : null}
         </div>

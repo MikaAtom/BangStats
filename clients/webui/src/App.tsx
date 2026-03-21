@@ -1707,17 +1707,28 @@ function CalendarAnalyticsView() {
   const [mode, setMode] = useState<CalendarExplorerMode>("month");
   const [selectedEventId, setSelectedEventId] = useState("");
   const [eventSearch, setEventSearch] = useState("");
-  const [selectedSong, setSelectedSong] = useState<ReferenceSongItem | null>(null);
+  const [selectedSong, setSelectedSong] = useState<SearchableSelectOption | null>(null);
   const [songSearch, setSongSearch] = useState("");
+  const [songCatalog, setSongCatalog] = useState<{
+    items: ReferenceSongItem[];
+    maxId: number;
+    initialized: boolean;
+    exhausted: boolean;
+    loading: boolean;
+    loadingMore: boolean;
+  }>({
+    items: [],
+    maxId: 0,
+    initialized: false,
+    exhausted: false,
+    loading: false,
+    loadingMore: false,
+  });
 
   const songIdRaw = searchParams.get("songId");
   const initialSongId = songIdRaw && /^\d+$/.test(songIdRaw) ? Number(songIdRaw) : undefined;
 
   const events = useLoadable(auth.user ? () => api.getReferenceEvents(1200) : null, [auth.user?.id]);
-  const referenceSongs = useLoadable<{ max_id: number; items: ReferenceSongItem[] }>(
-    auth.user ? () => api.getReferenceSongs(0, 5000) : null,
-    [auth.user?.id],
-  );
 
   useEffect(() => {
     const d = searchParams.get("calDay");
@@ -1733,13 +1744,73 @@ function CalendarAnalyticsView() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (!initialSongId || selectedSong || !referenceSongs.data?.items.length || !auth.user) return;
-    const match = referenceSongs.data.items.find((song) => Number(song.internal_song_id) === initialSongId) || null;
-    if (match) {
-      setSelectedSong(match);
-      setSongSearch("");
-    }
-  }, [initialSongId, selectedSong, referenceSongs.data?.items, auth.user]);
+    setSongCatalog({
+      items: [],
+      maxId: 0,
+      initialized: false,
+      exhausted: false,
+      loading: false,
+      loadingMore: false,
+    });
+  }, [auth.user?.id]);
+
+  useEffect(() => {
+    if (!initialSongId || selectedSong) return;
+    setSelectedSong({
+      value: String(initialSongId),
+      label: `Song #${initialSongId}`,
+      meta: `Song #${initialSongId}`,
+    });
+  }, [initialSongId, selectedSong]);
+
+  useEffect(() => {
+    if (!selectedSong) return;
+    const match = songCatalog.items.find((song) => String(song.internal_song_id) === selectedSong.value);
+    if (!match || !auth.user) return;
+    const label = correctionSongName(match, auth.user.server);
+    if (selectedSong.label === label) return;
+    setSelectedSong({
+      value: String(match.internal_song_id),
+      label,
+      keywords: `${match.tag} ${match.internal_song_id}`,
+      meta: `Song #${match.internal_song_id}`,
+    });
+  }, [selectedSong, songCatalog.items, auth.user]);
+
+  const loadSongChunk = useCallback(
+    async (mode: "initial" | "more" = "initial") => {
+      if (songCatalog.loading || songCatalog.loadingMore || songCatalog.exhausted) return;
+      const sinceId = mode === "initial" ? 0 : songCatalog.maxId;
+      setSongCatalog((current) => ({
+        ...current,
+        loading: mode === "initial",
+        loadingMore: mode === "more",
+      }));
+      try {
+        const response = await api.getReferenceSongs(sinceId, 250);
+        setSongCatalog((current) => {
+          const merged = mode === "initial" ? response.items : [...current.items, ...response.items];
+          const deduped = Array.from(new Map(merged.map((item) => [item.id, item])).values());
+          return {
+            items: deduped,
+            maxId: response.max_id || current.maxId,
+            initialized: true,
+            exhausted: response.items.length < 250,
+            loading: false,
+            loadingMore: false,
+          };
+        });
+      } catch {
+        setSongCatalog((current) => ({
+          ...current,
+          initialized: true,
+          loading: false,
+          loadingMore: false,
+        }));
+      }
+    },
+    [songCatalog.loading, songCatalog.loadingMore, songCatalog.exhausted, songCatalog.maxId],
+  );
 
   const eventStats = useLoadable<EventStatsResponse>(
     auth.user && selectedEventId
@@ -1760,7 +1831,7 @@ function CalendarAnalyticsView() {
 
   const calendarMonth = useLoadable<CalendarResponse>(
     auth.user && mode === "month"
-      ? () => api.getCalendar(auth.user!.id, anchorDate.getFullYear(), anchorDate.getMonth() + 1, filterQuery, selectedSong?.internal_song_id)
+      ? () => api.getCalendar(auth.user!.id, anchorDate.getFullYear(), anchorDate.getMonth() + 1, filterQuery, selectedSong ? Number(selectedSong.value) : undefined)
       : null,
     [
       auth.user?.id,
@@ -1770,7 +1841,7 @@ function CalendarAnalyticsView() {
       filters.difficulty,
       filters.liveType,
       filters.includeMeta,
-      selectedSong?.internal_song_id,
+      selectedSong?.value,
     ],
   );
 
@@ -1779,12 +1850,12 @@ function CalendarAnalyticsView() {
       ? async () => {
           const year = anchorDate.getFullYear();
           const months = await Promise.all(
-            Array.from({ length: 12 }, (_, index) => api.getCalendar(auth.user!.id, year, index + 1, filterQuery, selectedSong?.internal_song_id)),
+            Array.from({ length: 12 }, (_, index) => api.getCalendar(auth.user!.id, year, index + 1, filterQuery, selectedSong ? Number(selectedSong.value) : undefined)),
           );
           return { year, months };
         }
       : null,
-    [auth.user?.id, mode, anchorDate.getFullYear(), filters.difficulty, filters.liveType, filters.includeMeta, selectedSong?.internal_song_id],
+    [auth.user?.id, mode, anchorDate.getFullYear(), filters.difficulty, filters.liveType, filters.includeMeta, selectedSong?.value],
   );
 
   const calendarShots = useLoadable(
@@ -1792,7 +1863,7 @@ function CalendarAnalyticsView() {
       ? () =>
           api.listScreenshots(auth.user!.id, {
             ...filterQuery,
-            ...(selectedSong?.internal_song_id ? { songId: selectedSong.internal_song_id } : {}),
+            ...(selectedSong ? { songId: Number(selectedSong.value) } : {}),
             ...screenshotRange,
             limit: mode === "day" ? 80 : 200,
             offset: 0,
@@ -1811,13 +1882,12 @@ function CalendarAnalyticsView() {
       filters.difficulty,
       filters.liveType,
       filters.includeMeta,
-      selectedSong?.internal_song_id,
+      selectedSong?.value,
     ],
   );
 
   if (!auth.user) return null;
   const server = auth.user.server;
-  const songs = referenceSongs.data?.items || [];
   const recentEvents = ((events.data?.items || []) as Array<Record<string, unknown>>)
     .slice()
     .filter((event) => Number.isFinite(Number(event.event_id || event.id)) && Number(event.event_id || event.id) > 0)
@@ -1828,28 +1898,20 @@ function CalendarAnalyticsView() {
     keywords: String(event.event_id || event.id || ""),
   }));
   const selectedEventOption = eventOptions.find((option) => option.value === selectedEventId) || null;
-  const songOptions: SearchableSelectOption[] = getSongOptions(songs, songSearch, server).map((song) => ({
-    value: String(song.internal_song_id),
-    label: correctionSongName(song, server),
-    keywords: `${song.tag} ${song.internal_song_id}`,
-    meta: `Song #${song.internal_song_id}`,
-  }));
-  const selectedSongOption = selectedSong
-    ? {
-        value: String(selectedSong.internal_song_id),
-        label: correctionSongName(selectedSong, server),
-        keywords: `${selectedSong.tag} ${selectedSong.internal_song_id}`,
-        meta: `Song #${selectedSong.internal_song_id}`,
-      }
-    : null;
+  const songOptions: SearchableSelectOption[] = songCatalog.items
+    .filter((song) => {
+      const query = songSearch.trim().toLowerCase();
+      if (!query) return true;
+      return `${correctionSongName(song, server)} ${song.tag} ${song.internal_song_id}`.toLowerCase().includes(query);
+    })
+    .map((song) => ({
+      value: String(song.internal_song_id),
+      label: correctionSongName(song, server),
+      keywords: `${song.tag} ${song.internal_song_id}`,
+      meta: `Song #${song.internal_song_id}`,
+    }));
 
-  const subtitle = [
-    mode === "event" && selectedEventOption ? selectedEventOption.label : null,
-    mode === "event" && !selectedEventOption ? "Choose an event to load its full range." : null,
-    selectedSong ? `Song: ${correctionSongName(selectedSong, server)}` : "All songs",
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const activeSecondaryFilterCount = [filters.difficulty, filters.liveType, filters.includeMeta ? "meta" : ""].filter(Boolean).length;
 
   const centerControl =
     mode === "event" ? (
@@ -1873,51 +1935,52 @@ function CalendarAnalyticsView() {
         className="calendar-modal__search"
         label="Song"
         placeholder="Filter by song"
-        value={selectedSongOption}
+        value={selectedSong}
         searchText={songSearch}
         options={songOptions}
-        loading={referenceSongs.loading}
+        loading={songCatalog.loading}
+        loadingMore={songCatalog.loadingMore}
+        hasMore={!songCatalog.exhausted}
         emptyText="No songs match this search."
         onSearchTextChange={setSongSearch}
+        onOpenChange={(open) => {
+          if (open && !songCatalog.initialized) void loadSongChunk("initial");
+        }}
+        onReachEnd={() => {
+          if (!songCatalog.initialized) return;
+          void loadSongChunk("more");
+        }}
         onChange={(option) => {
           if (!option) {
             setSelectedSong(null);
             setSongSearch("");
             return;
           }
-          const match = songs.find((song) => String(song.internal_song_id) === option.value) || null;
-          setSelectedSong(match);
+          setSelectedSong(option);
           setSongSearch("");
         }}
       />
     );
 
   return (
-    <div className="page-grid">
-      <Card title="Calendar filters" subtitle="Difficulty, live type, and meta-song scope apply across every explorer mode.">
-        <div className="analytics-filter-row">
-          <SectionFilterControls filters={filters} onChange={setFilters} />
-        </div>
-      </Card>
-      <Card title="Explorer" subtitle={subtitle}>
-        <CalendarExplorerModal
-          open
-          variant="inline"
-          title="Calendar"
-          server={server}
-          mode={mode}
-          anchorDate={anchorDate}
-          onModeChange={setMode}
-          onAnchorDateChange={setAnchorDate}
-          onClose={() => {}}
-          yearState={calendarYear}
-          monthState={calendarMonth}
-          shotsState={calendarShots}
-          eventRange={calendarEventWindow}
-          headerCenter={centerControl}
-        />
-      </Card>
-    </div>
+    <CalendarExplorerModal
+      open
+      variant="inline"
+      title="Calendar"
+      server={server}
+      mode={mode}
+      anchorDate={anchorDate}
+      onModeChange={setMode}
+      onAnchorDateChange={setAnchorDate}
+      onClose={() => {}}
+      yearState={calendarYear}
+      monthState={calendarMonth}
+      shotsState={calendarShots}
+      eventRange={calendarEventWindow}
+      headerCenter={centerControl}
+      secondaryControls={<SectionFilterControls filters={filters} onChange={setFilters} />}
+      secondaryControlsCount={activeSecondaryFilterCount}
+    />
   );
 }
 
