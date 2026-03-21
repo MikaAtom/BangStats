@@ -42,6 +42,9 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
     const x = padLeft + t * innerW;
     const normalized = (point.skill_score - minScore) / scoreSpan;
     const y = padTop + innerH - normalized * innerH;
+    const prev = data.points[index - 1]?.skill_score;
+    const next = data.points[index + 1]?.skill_score;
+    const isValley = typeof prev === "number" && typeof next === "number" && point.skill_score < prev && point.skill_score < next;
     return {
       ...point,
       x,
@@ -49,9 +52,29 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
       axisLabel: formatAxisLabel(point.from_date, server),
       accuracyLabel: formatAccuracy(point.accuracy),
       textAnchor: (index === 0 ? "start" : index === n - 1 ? "end" : "middle") as "start" | "end" | "middle",
-      skillLabelY: y > padTop + innerH * 0.72 ? Math.min(y + 5.5, vbH - padBottom - 1.2) : Math.max(y - 4.2, padTop + 1.4),
+      skillLabelY: isValley ? Math.min(y + 5.8, vbH - padBottom - 0.8) : Math.max(y - 4.2, padTop + 1.4),
     };
   });
+
+  const segmentDeltas = points
+    .slice(0, -1)
+    .map((point, index) => {
+      const next = points[index + 1]!;
+      const delta = Number((next.skill_score - point.skill_score).toFixed(2));
+      const midX = (point.x + next.x) / 2;
+      const midY = (point.y + next.y) / 2;
+      const y = Math.max(Math.min(midY - 4.8, vbH - padBottom - 6), padTop + 3.5);
+      return {
+        key: `${point.label}-${next.label}`,
+        x: midX,
+        y,
+        label: `${delta >= 0 ? "+" : ""}${delta.toFixed(2)}`,
+      };
+    })
+    .filter((item, index, list) => {
+      const prev = list[index - 1];
+      return !prev || Math.abs(item.y - prev.y) > 2.2 || Math.abs(item.x - prev.x) > 7;
+    });
 
   const path = points
     .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(3)} ${point.y.toFixed(3)}`)
@@ -97,6 +120,11 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
                   {point.axisLabel}
                 </text>
               </g>
+            ))}
+            {segmentDeltas.map((item) => (
+              <text key={item.key} x={item.x} y={item.y} textAnchor="middle" className="trend-delta-label">
+                {item.label}
+              </text>
             ))}
           </svg>
         </div>

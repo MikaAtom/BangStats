@@ -276,6 +276,12 @@
   font-weight: 700;
 }
 
+.trend-delta-label {
+  fill: rgba(255, 255, 255, 0.78);
+  font-size: 2.3px;
+  font-weight: 600;
+}
+
 .trend-value-label {
   fill: var(--text-primary);
   font-size: 3.2px;
