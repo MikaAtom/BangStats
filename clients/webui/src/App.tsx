@@ -1583,7 +1583,7 @@ function OverviewActivitySnippet({
       <div className="overview-activity__footer">
         <span className="overview-activity__delta-label">Delta vs previous</span>
         <div className="overview-activity__delta-row">
-          <strong>Skill {data.delta_skill_score >= 0 ? "+" : ""}{data.delta_skill_score}</strong>
+          <span>Skill {data.delta_skill_score >= 0 ? "+" : ""}{data.delta_skill_score}</span>
           <span>Accuracy {data.delta_accuracy >= 0 ? "+" : ""}{data.delta_accuracy}%</span>
         </div>
       </div>
@@ -2886,6 +2886,8 @@ function RecentPlayList({
                 <span>Go {formatCount(item.good)}</span>
                 <span>B {formatCount(item.bad)}</span>
                 <span>M {formatCount(item.miss)}</span>
+              </div>
+              <div className="recent-live-row__stats-line recent-live-row__stats-line--timing">
                 <span>Fast {formatCount(item.fast)}</span>
                 <span>Slow {formatCount(item.slow)}</span>
               </div>

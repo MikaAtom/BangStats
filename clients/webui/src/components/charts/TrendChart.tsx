@@ -10,7 +10,7 @@ interface TrendChartProps {
 function formatAxisLabel(fromDate: string, server: User["server"]) {
   const parsed = new Date(fromDate);
   if (Number.isNaN(parsed.getTime())) return fromDate;
-  return parsed.toLocaleDateString(webLocale(server), { month: "short" });
+  return parsed.toLocaleDateString(webLocale(server), { month: "short", year: "2-digit" });
 }
 
 function formatAccuracy(value: number) {
@@ -88,9 +88,6 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
                   className="trend-guide-line"
                   vectorEffect="non-scaling-stroke"
                 />
-                <text x={point.x} y={Math.max(point.y - 2.5, padTop - 1)} textAnchor={point.textAnchor} className="trend-accuracy-label">
-                  {point.accuracyLabel}
-                </text>
                 <circle cx={point.x} cy={point.y} r="1.8" className="trend-dot" vectorEffect="non-scaling-stroke" />
                 <text x={point.x} y={vbH - 6.2} textAnchor={point.textAnchor} className="trend-axis-tick">
                   {point.axisLabel}
@@ -103,6 +100,7 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
           {points.map((point) => (
             <div key={point.label} className="trend-chart-overview__meta-col">
               <strong>{point.skill_score}</strong>
+              <span>{point.accuracyLabel}</span>
               <span>{point.plays} plays</span>
               <span>{point.fc} FC · {point.ap} AP</span>
             </div>

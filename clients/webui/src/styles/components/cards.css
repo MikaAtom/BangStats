@@ -245,12 +245,10 @@
   align-items: baseline;
 }
 
-.overview-activity__delta-row strong {
-  font-size: var(--text-base);
-}
-
 .overview-activity__delta-row span {
-  color: var(--text-secondary);
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
 }
 
 .recent-lives-list {
@@ -325,6 +323,11 @@
   color: var(--text-secondary);
   font-size: 0.8rem;
   line-height: 1.25;
+}
+
+.recent-live-row__stats-line--timing {
+  gap: 0.75rem;
+  flex-wrap: nowrap;
 }
 
 .recent-live-row__aside {
