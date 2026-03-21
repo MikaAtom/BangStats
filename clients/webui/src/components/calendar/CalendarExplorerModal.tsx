@@ -294,6 +294,7 @@ export function CalendarExplorerModal({
   monthState,
   shotsState,
   eventRange = null,
+  headerCenter = null,
   secondaryControls = null,
   secondaryControlsCount = 0,
   onStepEvent,
@@ -313,6 +314,7 @@ export function CalendarExplorerModal({
   monthState: Loadable<CalendarResponse> & { reload: () => Promise<void> };
   shotsState: Loadable<ScreenshotListResponse> & { reload: () => Promise<void> };
   eventRange?: { from_date: string; to_date: string } | null;
+  headerCenter?: ReactNode;
   secondaryControls?: ReactNode;
   secondaryControlsCount?: number;
   onStepEvent?: (direction: -1 | 1) => void;
@@ -411,6 +413,7 @@ export function CalendarExplorerModal({
                 Next
               </button>
             </div>
+            {headerCenter ? <div className="calendar-modal__focus">{headerCenter}</div> : null}
             {secondaryControls ? (
               <button className="button ghost calendar-modal__filter-toggle" type="button" onClick={() => setFiltersOpen((current) => !current)}>
                 Filters{secondaryControlsCount > 0 ? ` (${secondaryControlsCount})` : ""}

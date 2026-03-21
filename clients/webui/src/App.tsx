@@ -1947,9 +1947,12 @@ function CalendarAnalyticsView() {
   );
 
   const eventFilterControl =
+    null;
+
+  const eventTopControl =
     mode === "event" ? (
       <SearchableSelect
-        className="calendar-modal__search calendar-modal__search--filter"
+        className="calendar-modal__search calendar-modal__search--top"
         label="Event"
         placeholder="Select an event"
         value={selectedEventOption}
@@ -2001,6 +2004,7 @@ function CalendarAnalyticsView() {
       }}
       canStepEventBackward={Boolean(olderEventOption)}
       canStepEventForward={Boolean(newerEventOption)}
+      headerCenter={eventTopControl}
       secondaryControls={secondaryControls}
       secondaryControlsCount={activeSecondaryFilterCount}
     />
