@@ -76,13 +76,6 @@ function monthName(year: number, monthZeroBased: number, server: User["server"],
   return new Date(year, monthZeroBased, 1).toLocaleDateString(webLocale(server), { month: format });
 }
 
-function formatMonthHeading(data: CalendarResponse, server: User["server"]) {
-  return new Date(data.year, data.month - 1, 1).toLocaleDateString(webLocale(server), {
-    month: "long",
-    year: "numeric",
-  });
-}
-
 export function stepCalendarAnchor(mode: CalendarExplorerMode, anchor: Date, direction: -1 | 1) {
   if (mode === "event") return new Date(anchor.getTime());
   const next = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
@@ -234,14 +227,6 @@ function MonthWallCalendar({
 
   return (
     <div className="calendar-wall">
-      <div className="calendar-wall__hero">
-        <div>
-          <h4>{formatMonthHeading(data, server)}</h4>
-          <div className="inline-meta">
-            {data.total_days_with_plays} active days · {data.days.reduce((total, item) => total + item.plays, 0)} plays
-          </div>
-        </div>
-      </div>
       <div className="calendar-wall__weekday-row">
         {weekdayLabels(server).map((label, index) => (
           <div key={`${label}-${index}`} className="calendar-wall__weekday">
@@ -449,25 +434,19 @@ export function CalendarExplorerModal({
                 const yearData = yearState.data;
                 const maxYearPlays = Math.max(...yearData.months.flatMap((item) => item.days.map((day) => day.plays)), 1);
                 return (
-                  <div className="calendar-year">
-                    <div className="calendar-year__headline">
-                      <h4>{yearData.year}</h4>
-                      <span>{rangeLabel}</span>
-                    </div>
-                    <div className="calendar-year__grid">
-                      {yearData.months.map((month) => (
-                        <MiniMonthCard
-                          key={`${month.year}-${month.month}`}
-                          data={month}
-                          server={server}
-                          maxPlays={maxYearPlays}
-                          onSelect={() => {
-                            onAnchorDateChange(new Date(month.year, month.month - 1, 1));
-                            onModeChange("month");
-                          }}
-                        />
-                      ))}
-                    </div>
+                  <div className="calendar-year__grid">
+                    {yearData.months.map((month) => (
+                      <MiniMonthCard
+                        key={`${month.year}-${month.month}`}
+                        data={month}
+                        server={server}
+                        maxPlays={maxYearPlays}
+                        onSelect={() => {
+                          onAnchorDateChange(new Date(month.year, month.month - 1, 1));
+                          onModeChange("month");
+                        }}
+                      />
+                    ))}
                   </div>
                 );
               })()
