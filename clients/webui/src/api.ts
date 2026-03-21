@@ -155,13 +155,59 @@ export type ErrorCategoryActionResponse = {
 export type StatsOverview = {
   summary: Record<string, number>;
   top_songs: Array<{ song_id: number; song_name?: string | null; play_count: number }>;
-  recent: Array<{ song_id: number; song_name?: string | null; difficulty: string; timestamp?: string | null; filename?: string | null; live_type?: string | null; image_url?: string | null }>;
+  recent: Array<{
+    id: number;
+    song_id: number;
+    song_name?: string | null;
+    difficulty: string;
+    live_type?: string | null;
+    score: number;
+    accuracy: number;
+    perfect: number;
+    great: number;
+    good: number;
+    bad: number;
+    miss: number;
+    fast: number;
+    slow: number;
+    max_combo: number;
+    full_combo: boolean;
+    all_perfect: boolean;
+    anomaly: boolean;
+    timestamp?: string | null;
+    filename?: string | null;
+    image_url?: string | null;
+  }>;
   exclusion_context: {
     server_meta_song_ids: number[];
     user_excluded_song_ids: number[];
     effective_song_ids: number[];
     is_active: boolean;
   };
+};
+
+export type PlayMeta = {
+  id?: number | null;
+  song_id?: number | null;
+  song_name?: string | null;
+  difficulty?: string | null;
+  live_type?: string | null;
+  score?: number | null;
+  accuracy?: number | null;
+  perfect?: number | null;
+  great?: number | null;
+  good?: number | null;
+  bad?: number | null;
+  miss?: number | null;
+  fast?: number | null;
+  slow?: number | null;
+  max_combo?: number | null;
+  full_combo?: boolean | null;
+  all_perfect?: boolean | null;
+  anomaly?: boolean | null;
+  timestamp?: string | null;
+  filename?: string | null;
+  image_url?: string | null;
 };
 
 export type SongSearchResponse = {
@@ -176,7 +222,7 @@ export type SongStatsResponse = {
   difficulty_overview: Array<{
     difficulty: string;
     total_plays: number;
-    first_played?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
+    first_played?: PlayMeta | null;
     estimated_time_played_seconds: number;
     estimated_time_played_human: string;
   }>;
@@ -193,9 +239,9 @@ export type SongStatsResponse = {
     plays_before_ap?: number | null;
     estimated_time_played_human: string;
     skill_score: number;
-    first_played?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
-    first_fc?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
-    first_ap?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
+    first_played?: PlayMeta | null;
+    first_fc?: PlayMeta | null;
+    first_ap?: PlayMeta | null;
   } | null;
   exclusion_context: {
     server_meta_song_ids: number[];
@@ -210,7 +256,7 @@ export type MilestonesResponse = {
     type: string;
     label: string;
     play_count: number;
-    meta?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
+    meta?: PlayMeta | null;
   }>;
   best_streak_days: number;
   current_streak_days: number;
@@ -368,9 +414,9 @@ export type SongJourneyResponse = {
   song_name?: string | null;
   difficulty: string;
   total_plays: number;
-  first_played?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
-  first_fc?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
-  first_ap?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
+  first_played?: PlayMeta | null;
+  first_fc?: PlayMeta | null;
+  first_ap?: PlayMeta | null;
   plays_before_fc?: number | null;
   plays_before_ap?: number | null;
   skill_score: number;
@@ -378,6 +424,20 @@ export type SongJourneyResponse = {
   timeline: Array<{
     type: string;
     label: string;
+    song_id?: number | null;
+    song_name?: string | null;
+    difficulty?: string | null;
+    live_type?: string | null;
+    score?: number | null;
+    accuracy?: number | null;
+    perfect?: number | null;
+    great?: number | null;
+    good?: number | null;
+    bad?: number | null;
+    miss?: number | null;
+    fast?: number | null;
+    slow?: number | null;
+    max_combo?: number | null;
     timestamp?: string | null;
     filename?: string | null;
     image_url?: string | null;
@@ -408,7 +468,7 @@ export type RecapResponse = {
     fc_count: number;
     ap_count: number;
     skill_score: number;
-    latest_play?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
+    latest_play?: PlayMeta | null;
   }>;
   new_songs: Array<{
     song_id: number;
@@ -417,7 +477,7 @@ export type RecapResponse = {
     fc_count: number;
     ap_count: number;
     skill_score: number;
-    latest_play?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
+    latest_play?: PlayMeta | null;
   }>;
   most_practiced: Array<{
     song_id: number;
@@ -426,7 +486,7 @@ export type RecapResponse = {
     fc_count: number;
     ap_count: number;
     skill_score: number;
-    latest_play?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
+    latest_play?: PlayMeta | null;
   }>;
   live_types: Record<string, number>;
   active_hours: Record<string, number>;
@@ -434,7 +494,7 @@ export type RecapResponse = {
     title: string;
     value: string;
     detail: string;
-    screenshot?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
+    screenshot?: PlayMeta | null;
   }>;
   streaks: Record<string, number>;
   sessions: Record<string, number>;
@@ -457,7 +517,7 @@ export type SongRankingsResponse = {
     fc_count: number;
     ap_count: number;
     skill_score: number;
-    latest_play?: { timestamp?: string | null; filename?: string | null; image_url?: string | null } | null;
+    latest_play?: PlayMeta | null;
   }>;
   exclusion_context: {
     server_meta_song_ids: number[];

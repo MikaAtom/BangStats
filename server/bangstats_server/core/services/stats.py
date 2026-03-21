@@ -15,6 +15,24 @@ def _to_notes_total(play: Any) -> int:
 
 def _to_play_meta(play: Any) -> Dict[str, Any]:
     return {
+        "id": getattr(play, "id", None),
+        "song_id": int(getattr(play, "song_id", 0) or 0),
+        "song_name": getattr(play, "song_name", None),
+        "difficulty": str(getattr(play, "difficulty", "") or ""),
+        "live_type": str(getattr(play, "live_type", "") or ""),
+        "score": int(getattr(play, "score", 0) or 0),
+        "accuracy": float(getattr(play, "accuracy", 0.0) or 0.0),
+        "perfect": int(getattr(play, "perfect", 0) or 0),
+        "great": int(getattr(play, "great", 0) or 0),
+        "good": int(getattr(play, "good", 0) or 0),
+        "bad": int(getattr(play, "bad", 0) or 0),
+        "miss": int(getattr(play, "miss", 0) or 0),
+        "fast": int(getattr(play, "fast", 0) or 0),
+        "slow": int(getattr(play, "slow", 0) or 0),
+        "max_combo": int(getattr(play, "max_combo", 0) or 0),
+        "full_combo": bool(getattr(play, "full_combo", False)),
+        "all_perfect": bool(getattr(play, "all_perfect", False)),
+        "anomaly": bool(getattr(play, "anomaly", False)),
         "timestamp": getattr(play, "timestamp", None),
         "filename": getattr(play, "filename", None),
     }
@@ -111,8 +129,23 @@ def compute_recent_plays(screenshots: List[Any], n: int = 5) -> List[Dict[str, A
     )[:n]
     return [
         {
+            "id": int(getattr(s, "id", 0) or 0),
             "song_id": int(getattr(s, "song_id", 0)),
+            "song_name": getattr(s, "song_name", None),
             "difficulty": str(getattr(s, "difficulty", "")),
+            "score": int(getattr(s, "score", 0) or 0),
+            "accuracy": float(getattr(s, "accuracy", 0.0) or 0.0),
+            "perfect": int(getattr(s, "perfect", 0) or 0),
+            "great": int(getattr(s, "great", 0) or 0),
+            "good": int(getattr(s, "good", 0) or 0),
+            "bad": int(getattr(s, "bad", 0) or 0),
+            "miss": int(getattr(s, "miss", 0) or 0),
+            "fast": int(getattr(s, "fast", 0) or 0),
+            "slow": int(getattr(s, "slow", 0) or 0),
+            "max_combo": int(getattr(s, "max_combo", 0) or 0),
+            "full_combo": bool(getattr(s, "full_combo", False)),
+            "all_perfect": bool(getattr(s, "all_perfect", False)),
+            "anomaly": bool(getattr(s, "anomaly", False)),
             "timestamp": getattr(s, "timestamp", None),
             "filename": getattr(s, "filename", None),
             "live_type": str(getattr(s, "live_type", "")),
@@ -949,6 +982,20 @@ def compute_song_journey(
                 {
                     "type": key,
                     "label": label,
+                    "song_id": meta.get("song_id"),
+                    "song_name": song_name,
+                    "difficulty": meta.get("difficulty") or difficulty,
+                    "live_type": meta.get("live_type"),
+                    "score": meta.get("score"),
+                    "accuracy": meta.get("accuracy"),
+                    "perfect": meta.get("perfect"),
+                    "great": meta.get("great"),
+                    "good": meta.get("good"),
+                    "bad": meta.get("bad"),
+                    "miss": meta.get("miss"),
+                    "fast": meta.get("fast"),
+                    "slow": meta.get("slow"),
+                    "max_combo": meta.get("max_combo"),
                     "timestamp": meta.get("timestamp"),
                     "filename": meta.get("filename"),
                     "details": {},
@@ -1003,6 +1050,8 @@ def compute_recap(
             by_song[song_id].append(play)
     for song_id, song_plays in by_song.items():
         ordered = sorted(song_plays, key=lambda play: getattr(play, "timestamp", datetime.min))
+        fc_plays = [play for play in ordered if bool(getattr(play, "full_combo", False))]
+        ap_plays = [play for play in ordered if bool(getattr(play, "all_perfect", False))]
         top_song_rows.append(
             {
                 "song_id": song_id,
@@ -1012,6 +1061,8 @@ def compute_recap(
                 "ap_count": sum(1 for play in song_plays if bool(getattr(play, "all_perfect", False))),
                 "skill_score": compute_skill_score(song_plays),
                 "latest_play": _to_play_meta(ordered[-1]),
+                "latest_fc_play": _to_play_meta(fc_plays[-1]) if fc_plays else None,
+                "latest_ap_play": _to_play_meta(ap_plays[-1]) if ap_plays else None,
             }
         )
     top_song_rows = sorted(top_song_rows, key=lambda item: (int(item["play_count"]), float(item["skill_score"])), reverse=True)
@@ -1042,7 +1093,7 @@ def compute_recap(
                 "title": "Full Combo push",
                 "value": str(summary["total_fc"]),
                 "detail": "Full Combo clears recorded in this range.",
-                "screenshot": top_fc.get("latest_play") if top_fc else None,
+                "screenshot": top_fc.get("latest_fc_play") if top_fc else None,
             }
         )
     if summary.get("total_ap", 0):
@@ -1052,7 +1103,7 @@ def compute_recap(
                 "title": "All Perfect streak",
                 "value": str(summary["total_ap"]),
                 "detail": "All Perfect clears recorded in this range.",
-                "screenshot": top_ap.get("latest_play") if top_ap else None,
+                "screenshot": top_ap.get("latest_ap_play") if top_ap else None,
             }
         )
     return {

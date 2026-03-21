@@ -41,6 +41,24 @@ class SongRankingsResponse(BaseModel):
 
 
 class PlayMeta(BaseModel):
+    id: Optional[int] = None
+    song_id: Optional[int] = None
+    song_name: Optional[str] = None
+    difficulty: Optional[str] = None
+    live_type: Optional[str] = None
+    score: Optional[int] = None
+    accuracy: Optional[float] = None
+    perfect: Optional[int] = None
+    great: Optional[int] = None
+    good: Optional[int] = None
+    bad: Optional[int] = None
+    miss: Optional[int] = None
+    fast: Optional[int] = None
+    slow: Optional[int] = None
+    max_combo: Optional[int] = None
+    full_combo: Optional[bool] = None
+    all_perfect: Optional[bool] = None
+    anomaly: Optional[bool] = None
     timestamp: Optional[datetime] = None
     filename: Optional[str] = None
     image_url: Optional[str] = None
@@ -254,6 +272,20 @@ class ProgressionResponse(BaseModel):
 class TimelinePoint(BaseModel):
     type: str
     label: str
+    song_id: Optional[int] = None
+    song_name: Optional[str] = None
+    difficulty: Optional[str] = None
+    live_type: Optional[str] = None
+    score: Optional[int] = None
+    accuracy: Optional[float] = None
+    perfect: Optional[int] = None
+    great: Optional[int] = None
+    good: Optional[int] = None
+    bad: Optional[int] = None
+    miss: Optional[int] = None
+    fast: Optional[int] = None
+    slow: Optional[int] = None
+    max_combo: Optional[int] = None
     timestamp: Optional[datetime] = None
     filename: Optional[str] = None
     image_url: Optional[str] = None

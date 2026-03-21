@@ -23,9 +23,9 @@ import {
   type ErrorList,
   type EventStatsResponse,
   type FilenameDiffResponse,
-  type InsightsResponse,
   type MilestonesResponse,
   type MetaSongConfigResponse,
+  type PlayMeta,
   type ProgressionResponse,
   type RecapResponse,
   type ReferenceSongItem,
@@ -93,6 +93,15 @@ const DIFFICULTY_FILTERS = ["easy", "normal", "hard", "expert", "special"];
 const LIVE_TYPE_FILTERS = ["normal_live", "event_live", "challenge_live", "multi_live", "vs_live", "free_live"];
 const CORRECTION_DIFFICULTIES = ["easy", "normal", "hard", "expert", "special"] as const;
 const CORRECTION_LIVE_TYPES = ["free live", "multi live", "challenge live", "team live battle", "medley live"] as const;
+const ERROR_CATEGORY_LABELS: Record<string, string> = {
+  bad_json_format: "Invalid JSON format",
+  image_not_found: "Image not found",
+  validation_failed: "Validation failed",
+  duplicate_entry: "Duplicate entry",
+  parse_failed: "Parsing failed",
+  anomaly_detected: "Anomaly detected",
+  persist_failed: "Failed to save",
+};
 
 type CorrectionFormState = {
   song_name_from_top_bar_text: string;
@@ -135,6 +144,61 @@ function parseNumber(value: unknown, fallback = 0) {
     if (Number.isFinite(parsed)) return parsed;
   }
   return fallback;
+}
+
+function toTimestampString(value: unknown): string {
+  if (typeof value === "string" && value.trim()) return value;
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString();
+  return new Date(0).toISOString();
+}
+
+function toCompactScreenshotItem(
+  meta: Partial<ScreenshotItem> | PlayMeta | null | undefined,
+  fallback: {
+    idSeed: number;
+    songId?: number;
+    songName?: string | null;
+    difficulty?: string;
+    liveType?: string;
+  },
+): ScreenshotItem | null {
+  if (!meta) return null;
+  const songId = Number(meta.song_id ?? fallback.songId ?? 0);
+  const resolvedId = Number(meta.id ?? 0);
+  return {
+    id: Number.isFinite(resolvedId) && resolvedId > 0 ? resolvedId : fallback.idSeed,
+    filename: meta.filename ?? null,
+    song_id: Number.isFinite(songId) && songId > 0 ? songId : Math.max(1, fallback.idSeed),
+    song_name: meta.song_name ?? fallback.songName ?? null,
+    difficulty: String(meta.difficulty ?? fallback.difficulty ?? "unknown"),
+    live_type: String(meta.live_type ?? fallback.liveType ?? "normal_live"),
+    score: Number(meta.score ?? 0),
+    accuracy: Number(meta.accuracy ?? 0),
+    perfect: Number(meta.perfect ?? 0),
+    great: Number(meta.great ?? 0),
+    good: Number(meta.good ?? 0),
+    bad: Number(meta.bad ?? 0),
+    miss: Number(meta.miss ?? 0),
+    fast: Number(meta.fast ?? 0),
+    slow: Number(meta.slow ?? 0),
+    max_combo: Number(meta.max_combo ?? 0),
+    full_combo: Boolean(meta.full_combo),
+    all_perfect: Boolean(meta.all_perfect),
+    anomaly: Boolean(meta.anomaly),
+    timestamp: toTimestampString(meta.timestamp),
+    image_available: Boolean(meta.image_url),
+    image_url: meta.image_url ?? null,
+  };
+}
+
+function formatErrorCategoryLabel(category: string): string {
+  const normalized = category.trim().toLowerCase();
+  if (ERROR_CATEGORY_LABELS[normalized]) return ERROR_CATEGORY_LABELS[normalized];
+  return category
+    .split("_")
+    .filter(Boolean)
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join(" ");
 }
 
 function parseCorrectionForm(scanData: Record<string, unknown>): CorrectionFormState {
@@ -750,7 +814,7 @@ function DashboardPage() {
           {data.scan_errors.total > 0 && (
             <Card title="Scan errors">
               <KeyValueList
-                items={Object.entries(data.scan_errors.errors).map(([key, value]) => [key, String(value)])}
+                items={Object.entries(data.scan_errors.errors).map(([key, value]) => [formatErrorCategoryLabel(key), String(value)])}
                 emptyLabel="No current errors."
               />
               <Link className="text-link" to="/scan/errors">
@@ -969,38 +1033,10 @@ function ScanPage() {
               <option value="server_folder">Server folder</option>
             </select>
           </label>
-          <label className="field">
-            <span>Folder path on server</span>
-            <input value={folderPath} onChange={(event) => setFolderPath(event.target.value)} placeholder="/srv/screenshots/user1" />
-          </label>
-          <label className="field">
-            <span>Parallel workers</span>
-            <input value={parallelWorkers} onChange={(event) => setParallelWorkers(event.target.value)} />
-          </label>
-          <label className="field">
-            <span>Keys per worker</span>
-            <input value={keysPerWorker} onChange={(event) => setKeysPerWorker(event.target.value)} />
-          </label>
-          <div className="button-row">
-            <button
-              className="button accent"
-              type="button"
-              disabled={selectedSource === "server_folder" && !user.server_folder_authorized}
-              onClick={() => {
-                if (selectedSource === "server_folder") {
-                  void startServerFolderScan();
-                } else {
-                  void startUploadScan();
-                }
-              }}
-            >
-              Start scan
-            </button>
-          </div>
         </div>
       </Card>
-      <div className="layout-two">
-        <Card title="1. Browser upload flow">
+      <Card title="1. Required source inputs">
+        {selectedSource === "upload" ? (
           <div className="stack">
             <label className="field">
               <span>Select screenshot files</span>
@@ -1012,20 +1048,21 @@ function ScanPage() {
               />
             </label>
             <div className="inline-meta">{selectedFiles.length} file(s) selected</div>
-            <div className="button-row">
-              <button className="button primary" onClick={() => void uploadSelected()}>
-                Upload to storage
-              </button>
-            </div>
+            <button className="button primary" onClick={() => void uploadSelected()}>
+              Upload to storage
+            </button>
             {capabilities.data && (
               <div className="inline-meta">
                 OCR: {capabilities.data.provider} | Google keys: {capabilities.data.available_google_keys}
               </div>
             )}
           </div>
-        </Card>
-        <Card title="2. Server-folder flow">
+        ) : (
           <div className="stack">
+            <label className="field">
+              <span>Folder path on server</span>
+              <input value={folderPath} onChange={(event) => setFolderPath(event.target.value)} placeholder="/srv/screenshots/user1" />
+            </label>
             <label className="field">
               <span>Master key</span>
               <input type="password" value={masterKey} onChange={(event) => setMasterKey(event.target.value)} />
@@ -1037,10 +1074,46 @@ function ScanPage() {
               Authorized: {user.server_folder_authorized ? "Yes" : "No"}
             </div>
           </div>
-        </Card>
-      </div>
+        )}
+      </Card>
+      <Card title="2. Advanced options">
+        <details>
+          <summary>Worker tuning</summary>
+          <div className="stack">
+            <label className="field">
+              <span>Parallel workers</span>
+              <input value={parallelWorkers} onChange={(event) => setParallelWorkers(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Keys per worker</span>
+              <input value={keysPerWorker} onChange={(event) => setKeysPerWorker(event.target.value)} />
+            </label>
+          </div>
+        </details>
+      </Card>
+      <Card title="3. Start scan">
+        <div className="stack">
+          <div className="inline-meta">
+            Source: {selectedSource === "upload" ? "Upload storage" : "Server folder"}
+          </div>
+          <button
+            className="button accent"
+            type="button"
+            disabled={selectedSource === "server_folder" && !user.server_folder_authorized}
+            onClick={() => {
+              if (selectedSource === "server_folder") {
+                void startServerFolderScan();
+              } else {
+                void startUploadScan();
+              }
+            }}
+          >
+            Start scan
+          </button>
+        </div>
+      </Card>
       <div className="layout-two">
-        <Card title="3. Legacy JSON import">
+        <Card title="Legacy JSON import">
           <div className="stack">
             <label className="field">
               <span>JSON folder path</span>
@@ -1123,7 +1196,10 @@ function ScanJobPage() {
             <MetricCard label="Failed to persist" value={job.data.failed_to_persist} />
           </div>
           <Card title="Error buckets">
-            <KeyValueList items={Object.entries(job.data.errors).map(([key, value]) => [key, String(value)])} emptyLabel="No job errors." />
+            <KeyValueList
+              items={Object.entries(job.data.errors).map(([key, value]) => [formatErrorCategoryLabel(key), String(value)])}
+              emptyLabel="No job errors."
+            />
           </Card>
           <Card title="Files by error type">
             <CodeBlock value={job.data.error_files} />
@@ -1176,13 +1252,13 @@ function ErrorInboxPage() {
             <Card
               key={errorType}
               className="error-category-card"
-              title={`${errorType} (${files.length})`}
+              title={`${formatErrorCategoryLabel(errorType)} (${files.length})`}
               actions={
                 <div className="button-row error-card-actions">
-                  <button className="button ghost" onClick={() => void runAction("revalidate", errorType)}>
+                  <button className="button ghost" disabled={files.length === 0} onClick={() => void runAction("revalidate", errorType)}>
                     Revalidate
                   </button>
-                  <button className="button accent" onClick={() => void runAction("rescan", errorType)}>
+                  <button className="button accent" disabled={files.length === 0} onClick={() => void runAction("rescan", errorType)}>
                     Rescan
                   </button>
                 </div>
@@ -1681,11 +1757,6 @@ function ProgressAnalyticsView() {
       >
         {calendar.data ? <CalendarHeatmap data={calendar.data} /> : <LoadingInline />}
       </Card>
-      <Card title="Milestones">
-        <div className="inline-meta">
-          Milestones moved to their own tab for focused browsing. <Link to="/stats?view=milestones">Open milestones tab</Link>.
-        </div>
-      </Card>
     </div>
   );
 }
@@ -1795,22 +1866,8 @@ function SongsAnalyticsView() {
               </div>
             </label>
             <label className="field inline-field">
-              <span>Sort songs by</span>
-              <select value={sortBy} onChange={(event) => setSortBy(event.target.value as SongSortKey)}>
-                <option value="play_count">Plays</option>
-                <option value="skill_score">Skill score</option>
-                <option value="fc_count">FC count</option>
-                <option value="ap_count">AP count</option>
-                <option value="song_name">Song name</option>
-                <option value="latest_play">Latest</option>
-              </select>
-            </label>
-            <label className="field inline-field">
-              <span>Order</span>
-              <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value as "asc" | "desc")}>
-                <option value="desc">Descending</option>
-                <option value="asc">Ascending</option>
-              </select>
+              <span>Sorting</span>
+              <div className="inline-meta">Use table headers to sort by song, plays, FC, AP, skill, or latest play.</div>
             </label>
             <SectionFilterControls filters={filters} onChange={setFilters} />
           </div>
@@ -1947,6 +2004,7 @@ function RecapAnalyticsView() {
     id: String(event.event_id || event.id || ""),
     label: formatEventLabelDateOnly(event, auth.user!.server),
   }));
+  const filteredEventOptions = eventOptions.filter((option) => option.label.toLowerCase().includes(eventQuery.trim().toLowerCase()));
 
   return (
     <div className="page-grid">
@@ -1963,25 +2021,30 @@ function RecapAnalyticsView() {
             </select>
           </label>
           {scope === "event" ? (
-            <label className="field">
-              <span>Event (search)</span>
+            <div className="field">
+              <span>Event (search + dropdown)</span>
               <input
-                list="recap-event-options"
                 value={eventQuery}
-                onChange={(event) => {
-                  const nextValue = event.target.value;
-                  setEventQuery(nextValue);
-                  const match = eventOptions.find((item) => item.label === nextValue);
-                  setSelectedEventId(match ? match.id : "");
-                }}
+                onChange={(event) => setEventQuery(event.target.value)}
                 placeholder="Search event by name/date"
               />
-              <datalist id="recap-event-options">
-                {eventOptions.map((option) => (
-                  <option key={option.id} value={option.label} />
+              <select
+                value={selectedEventId}
+                size={6}
+                onChange={(event) => {
+                  const nextId = event.target.value;
+                  setSelectedEventId(nextId);
+                  const picked = eventOptions.find((item) => item.id === nextId);
+                  if (picked) setEventQuery(picked.label);
+                }}
+              >
+                {filteredEventOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
                 ))}
-              </datalist>
-            </label>
+              </select>
+            </div>
           ) : (
             <div className="button-row tight analytics-month-nav">
               <button className="button ghost" type="button" onClick={() => setAnchorDate((prev) => shiftRecapAnchor(scope, prev, -1))}>
@@ -2243,11 +2306,12 @@ function SongStatsPage() {
             <Card title="Milestone captures">
               {data.data.detail ? (
                 <MilestoneGallery
+                  songId={songIdNumber}
                   items={[
                     data.data.detail.first_played ? { label: "First play", meta: data.data.detail.first_played } : null,
                     data.data.detail.first_fc ? { label: "First FC", meta: data.data.detail.first_fc } : null,
                     data.data.detail.first_ap ? { label: "First AP", meta: data.data.detail.first_ap } : null,
-                  ].filter(Boolean) as Array<{ label: string; meta: { timestamp?: string | null; filename?: string | null; image_url?: string | null } }>}
+                  ].filter(Boolean) as Array<{ label: string; meta: PlayMeta }>}
                 />
               ) : (
                 <EmptyState text="Milestone screenshots appear here when that difficulty has them." />
@@ -2504,33 +2568,6 @@ function AuthCard({
   );
 }
 
-// Remaining helper components (not yet extracted)
-
-function InsightsPanel({ data }: { data: InsightsResponse }) {
-  return (
-    <div className="stack">
-      <div className="inline-meta">{formatDateRange(data.from_date, data.to_date)}</div>
-      <KeyValueList
-        items={[
-          ["Observed plays", String(data.data_quality.observed_plays)],
-          ["Sessions", String(data.sessions.total_sessions)],
-          ["Avg session minutes", String(data.sessions.avg_session_minutes)],
-          ["Avg plays/session", String(data.sessions.avg_plays_per_session)],
-          ["Longest session", `${data.sessions.longest_session_minutes} min`],
-        ]}
-      />
-      <ul className="list">
-        {data.practice_periods.slice(0, 5).map((item) => (
-          <li key={`${item.song_id}-${item.latest_burst_at || "burst"}`}>
-            <strong>{item.song_name || `Song ${item.song_id}`}</strong>: {item.total_plays} plays, max burst {item.max_burst_plays}, {item.estimated_time_played_human}
-            {item.latest_burst_at && <span className="inline-meta"> · latest burst {formatDateTime(item.latest_burst_at)}</span>}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function SectionFilterControls({
   filters,
   onChange,
@@ -2595,25 +2632,21 @@ function ExclusionPill({
 function RecentPlayList({
   items,
 }: {
-  items: Array<{ song_id: number; song_name?: string | null; difficulty: string; timestamp?: string | null; filename?: string | null; live_type?: string | null; image_url?: string | null }>;
+  items: StatsOverview["recent"];
 }) {
-  if (!items.length) return <EmptyState text="No recent plays found." />;
-  return (
-    <div className="list-grid">
-      {items.map((item, index) => (
-        <div key={`${item.song_id}-${item.timestamp || index}`} className="list-card">
-          <div>
-            <strong>{item.song_name || `Song #${item.song_id}`}</strong>
-            <div className="inline-meta">
-              {formatDifficulty(item.difficulty)} | {formatLiveType(item.live_type)}
-            </div>
-          </div>
-          <div className="inline-meta">{formatDateTime(item.timestamp)}</div>
-          {item.image_url ? <SecureImage path={item.image_url} alt={item.filename || `play-${index}`} className="thumb-image" /> : <div className="gallery-placeholder thumb-image">No image</div>}
-        </div>
-      ))}
-    </div>
-  );
+  const galleryItems = items
+    .map((item, index) =>
+      toCompactScreenshotItem(item, {
+        idSeed: item.id || index + 1,
+        songId: item.song_id,
+        songName: item.song_name,
+        difficulty: item.difficulty,
+        liveType: item.live_type || "normal_live",
+      }),
+    )
+    .filter((item): item is ScreenshotItem => item !== null);
+  if (!galleryItems.length) return <EmptyState text="No recent plays found." />;
+  return <ScreenshotGallery items={galleryItems} />;
 }
 
 function SongRankingsTable({
@@ -2676,14 +2709,21 @@ function RecapPanel({ data }: { data: RecapResponse }) {
         <MetricCard label="Sessions" value={data.sessions.total_sessions || 0} />
       </div>
       <div className="card-grid recap-grid">
-        {data.highlights.map((item) => (
+        {data.highlights.map((item, index) => {
+          const screenshot = toCompactScreenshotItem(item.screenshot, {
+            idSeed: 10000 + index,
+            songName: item.value,
+            difficulty: "unknown",
+          });
+          return (
           <div className="highlight-card" key={item.title}>
             <span className="brand-kicker">{item.title}</span>
             <strong>{item.value}</strong>
             <p>{item.detail}</p>
-            {item.screenshot?.image_url && <SecureImage path={item.screenshot.image_url} alt={item.screenshot.filename || item.title} className="highlight-image" />}
+            {screenshot ? <ScreenshotGallery items={[screenshot]} /> : null}
           </div>
-        ))}
+          );
+        })}
       </div>
       <div>
         <div className="subheading">Top songs</div>
@@ -2745,14 +2785,21 @@ function EventFocusPanel({
         <div className="stack">
           <div className="subheading">Event highlights</div>
           <div className="card-grid recap-grid">
-            {recap.highlights.map((item) => (
+            {recap.highlights.map((item, index) => {
+              const screenshot = toCompactScreenshotItem(item.screenshot, {
+                idSeed: 20000 + index,
+                songName: item.value,
+                difficulty: "unknown",
+              });
+              return (
               <div className="highlight-card" key={`${stats.event_id}-${item.title}`}>
                 <span className="brand-kicker">{item.title}</span>
                 <strong>{item.value}</strong>
                 <p>{item.detail}</p>
-                {item.screenshot?.image_url && <SecureImage path={item.screenshot.image_url} alt={item.screenshot.filename || item.title} className="highlight-image" />}
+                {screenshot ? <ScreenshotGallery items={[screenshot]} /> : null}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -2811,7 +2858,15 @@ function MilestoneTimeline({
           <div className="timeline-marker" />
           <div className="timeline-content milestone-row">
             {item.meta?.image_url ? (
-              <SecureImage path={item.meta.image_url} alt={item.label} className="thumb-image" />
+              <ScreenshotGallery
+                items={[
+                  toCompactScreenshotItem(item.meta, {
+                    idSeed: 30000 + index,
+                    songName: item.label,
+                    difficulty: item.meta?.difficulty || "unknown",
+                  }),
+                ].filter((entry): entry is ScreenshotItem => entry !== null)}
+              />
             ) : (
               <div className="gallery-placeholder thumb-image">No image</div>
             )}
@@ -2828,24 +2883,24 @@ function MilestoneTimeline({
 }
 
 function MilestoneGallery({
+  songId,
   items,
 }: {
-  items: Array<{ label: string; meta: { timestamp?: string | null; filename?: string | null; image_url?: string | null } }>;
+  songId: number;
+  items: Array<{ label: string; meta: PlayMeta }>;
 }) {
-  if (!items.length) return <EmptyState text="No milestone images available." />;
-  return (
-    <div className="gallery milestone-gallery">
-      {items.map((item) => (
-        <div className="gallery-card" key={item.label}>
-          {item.meta.image_url ? <SecureImage path={item.meta.image_url} alt={item.meta.filename || item.label} className="gallery-image" /> : <div className="gallery-placeholder">No image</div>}
-          <div className="gallery-meta">
-            <strong>{item.label}</strong>
-            <span>{item.meta.timestamp ? new Date(item.meta.timestamp).toLocaleString() : "Unknown date"}</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+  const galleryItems = items
+    .map((item, index) =>
+      toCompactScreenshotItem(item.meta, {
+        idSeed: 40000 + index,
+        songId,
+        songName: item.label,
+        difficulty: item.meta.difficulty || "unknown",
+      }),
+    )
+    .filter((item): item is ScreenshotItem => item !== null);
+  if (!galleryItems.length) return <EmptyState text="No milestone images available." />;
+  return <ScreenshotGallery items={galleryItems} />;
 }
 
 function JourneySummary({ data }: { data: SongJourneyResponse }) {
@@ -2857,7 +2912,6 @@ function JourneySummary({ data }: { data: SongJourneyResponse }) {
         ["Skill score", String(data.skill_score)],
         ["Plays before FC", data.plays_before_fc == null ? "Not found" : String(data.plays_before_fc)],
         ["Plays before AP", data.plays_before_ap == null ? "Not found" : String(data.plays_before_ap)],
-        ["Practice windows", String(data.practice_periods.length)],
       ]}
     />
   );
@@ -2866,18 +2920,51 @@ function JourneySummary({ data }: { data: SongJourneyResponse }) {
 function TimelinePanel({
   items,
 }: {
-  items: Array<{ type: string; label: string; timestamp?: string | null; filename?: string | null; image_url?: string | null; details: Record<string, unknown> }>;
+  items: Array<{
+    type: string;
+    label: string;
+    timestamp?: string | null;
+    filename?: string | null;
+    image_url?: string | null;
+    song_id?: number | null;
+    song_name?: string | null;
+    difficulty?: string | null;
+    live_type?: string | null;
+    score?: number | null;
+    accuracy?: number | null;
+    perfect?: number | null;
+    great?: number | null;
+    good?: number | null;
+    bad?: number | null;
+    miss?: number | null;
+    fast?: number | null;
+    slow?: number | null;
+    max_combo?: number | null;
+    details: Record<string, unknown>;
+  }>;
 }) {
-  if (!items.length) return <EmptyState text="No timeline items found." />;
+  const filteredItems = items.filter((item) => item.type !== "practice_period");
+  if (!filteredItems.length) return <EmptyState text="No timeline items found." />;
   return (
     <div className="timeline">
-      {items.map((item, index) => (
+      {filteredItems.map((item, index) => (
         <div className="timeline-item" key={`${item.type}-${item.timestamp || index}`}>
           <div className="timeline-marker" />
           <div className="timeline-content">
             <strong>{item.label}</strong>
             <div className="inline-meta">{item.timestamp ? new Date(item.timestamp).toLocaleString() : "No timestamp"}</div>
-            {item.image_url && <SecureImage path={item.image_url} alt={item.filename || item.label} className="thumb-image" />}
+            {item.image_url ? (
+              <ScreenshotGallery
+                items={[
+                  toCompactScreenshotItem(item, {
+                    idSeed: 50000 + index,
+                    songName: item.label,
+                    difficulty: item.difficulty || "unknown",
+                    liveType: item.live_type || "normal_live",
+                  }),
+                ].filter((entry): entry is ScreenshotItem => entry !== null)}
+              />
+            ) : null}
             {!!Object.keys(item.details || {}).length && <CodeBlock value={item.details} />}
           </div>
         </div>
