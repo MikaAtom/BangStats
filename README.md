@@ -37,6 +37,20 @@ Start web UI (in another terminal):
 You can also run the legacy direct client script:
 - `uv run bangstats-client`
 
+### Maintenance scripts
+Run maintenance scripts directly (no `python scripts/...` needed):
+- `uv run list_screenshot_diff --help`
+- `uv run heal_screenshot_filenames --help`
+- `uv run dedupe_screenshots --help`
+
+Examples:
+- Compare DB filenames vs screenshot folder:
+  - `uv run list_screenshot_diff --user-id 3 --folder /srv/data/BangStats/user/screens`
+- Heal extension mismatches and remove stale collision duplicates:
+  - `uv run heal_screenshot_filenames --user-id 3 --folder /srv/data/BangStats/user/screens --resolve-collisions --apply`
+- Remove duplicate live-result rows within 60 seconds (older row kept):
+  - `uv run dedupe_screenshots --user-id 3 --threshold-seconds 60 --apply`
+
 ### Common command examples
 - Server custom host/port:
   - `uv run bangstats server --host 127.0.0.1 --port 8000`

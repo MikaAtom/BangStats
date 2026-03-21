@@ -362,7 +362,7 @@ function ProtectedLayout() {
     {
       to: "/scan",
       label: "Scan",
-      isActive: (pathname) => pathname.startsWith("/scan") && !pathname.startsWith("/scan/errors"),
+      isActive: (pathname) => pathname === "/scan" || pathname.startsWith("/scan/jobs"),
     },
     { to: "/scan/errors", label: "Error Inbox", isActive: (pathname) => pathname.startsWith("/scan/errors") },
     { to: "/stats", label: "Stats", isActive: (pathname) => pathname.startsWith("/stats") },
@@ -379,7 +379,12 @@ function ProtectedLayout() {
         </div>
         <nav className="nav">
           {sidebarItems.map((item) => (
-            <NavLink key={item.to} to={item.to} className={item.isActive(location.pathname) ? "nav-link active" : "nav-link"}>
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === "/scan"}
+              className={item.isActive(location.pathname) ? "nav-link active" : "nav-link"}
+            >
               {item.label}
             </NavLink>
           ))}
@@ -1126,13 +1131,14 @@ function ErrorInboxPage() {
       {errors.loading && <LoadingCard label="Loading error categories..." />}
       {errors.error && <div className="notice error">{errors.error}</div>}
       {errors.data && (
-        <div className="card-grid">
+        <div className="card-grid error-inbox-grid">
           {Object.entries(errors.data.error_files).map(([errorType, files]) => (
             <Card
               key={errorType}
+              className="error-category-card"
               title={`${errorType} (${files.length})`}
               actions={
-                <div className="button-row">
+                <div className="button-row error-card-actions">
                   <button className="button ghost" onClick={() => void runAction("revalidate", errorType)}>
                     Revalidate
                   </button>
