@@ -1,4 +1,4 @@
 export { BarChart } from "./BarChart";
-export { ActivityBars } from "./ActivityBars";
+export { ActivitySummary } from "./ActivitySummary";
 export { CalendarHeatmap } from "./CalendarHeatmap";
 export { TrendChart } from "./TrendChart";

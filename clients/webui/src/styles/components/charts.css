@@ -84,7 +84,7 @@
 }
 
 .trend-chart-synced.stack {
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
 .trend-chart-synced__plot {
@@ -99,7 +99,7 @@
   width: 100%;
   min-width: 0;
   height: auto;
-  max-height: 160px;
+  max-height: 220px;
   display: block;
   background: transparent;
   border: none;
@@ -116,8 +116,11 @@
 
 .trend-chart-synced__columns {
   display: grid;
-  gap: var(--space-2);
-  margin-top: var(--space-1);
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: 2px;
+  min-width: 0;
 }
 
 .trend-chart-synced__col {
@@ -143,7 +146,18 @@
 }
 
 .trend-summary-card--under strong {
-  font-size: var(--text-lg);
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+}
+
+.trend-summary-card--under small {
+  font-size: 0.7rem;
+  line-height: 1.25;
+}
+
+/* Activity summary (progress tab) */
+.activity-summary__grid {
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
 }
 
 .trend-chart {

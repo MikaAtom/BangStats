@@ -45,7 +45,7 @@ import {
 
 import { Card, MetricCard, LoadingCard, LoadingInline, EmptyState, SectionHeader, SecureImage, DateRangePicker, type DateRangeValue } from "./components/ui";
 import { KeyValueList, JobList } from "./components/data-display";
-import { BarChart, ActivityBars, TrendChart } from "./components/charts";
+import { BarChart, ActivitySummary, TrendChart } from "./components/charts";
 import { UploadGallery, ScreenshotGallery } from "./components/galleries";
 import {
   formatDateRange,
@@ -1482,7 +1482,7 @@ function OverviewAnalyticsView() {
         )}
       </Card>
       <div className="layout-two">
-        <Card title="Current progress snapshot">
+        <Card title="Current progress snapshot" subtitle="Skill score per period — hover chart points for details">
           {progression.data ? <TrendChart data={progression.data} /> : <LoadingInline />}
         </Card>
         <Card title="Recent meaningful plays">
@@ -1561,14 +1561,19 @@ function ProgressAnalyticsView() {
 
   return (
     <div className="page-grid">
-      <Card title="Skill trend">
-        <p className="inline-meta" style={{ margin: "0 0 0.85rem" }}>
-          <strong>Trend scope</strong> and <strong>data points</strong> only affect the skill progression chart below.{" "}
-          <strong>Difficulty</strong>, <strong>live type</strong>, and <strong>meta songs</strong> filter which plays are counted here, in{" "}
-          <strong>Activity</strong>, and in the <strong>calendar</strong>.
+      <Card
+        title="Scope & filters"
+        actions={
+          <button className="button primary" type="button" onClick={() => setCalendarOpen(true)}>
+            Open calendar
+          </button>
+        }
+      >
+        <p className="inline-meta progress-analytics-toolbar__hint">
+          Play filters apply to progression, activity, and calendar. Trend scope and data points only change the skill chart. Activity window sets the date range for metrics below.
         </p>
-        <div className="analytics-control-rail">
-          <div className="analytics-control-rail__cluster">
+        <div className="progress-analytics-toolbar">
+          <div className="progress-analytics-toolbar__row progress-analytics-toolbar__row--trend">
             <label className="field inline-field">
               <span>Trend scope</span>
               <select value={scope} onChange={(event) => setScope(event.target.value as "weekly" | "monthly" | "yearly")}>
@@ -1591,50 +1596,42 @@ function ProgressAnalyticsView() {
               />
             </label>
           </div>
-          <div className="analytics-control-rail__cluster analytics-control-rail__cluster--end">
+          <div className="progress-analytics-toolbar__row progress-analytics-toolbar__row--filters">
             <SectionFilterControls filters={filters} onChange={setFilters} />
           </div>
+          <div className="progress-analytics-toolbar__row progress-analytics-toolbar__row--activity">
+            <span className="progress-analytics-toolbar__activity-label">Activity window</span>
+            <div className="progress-analytics-toolbar__activity-picker">
+              <DateRangePicker value={range} onChange={setRange} />
+            </div>
+          </div>
+          <div className="inline-meta progress-analytics-toolbar__footer">
+            Calendar anchor:{" "}
+            <strong>{formatDifficulty(calMode)}</strong> ·{" "}
+            <strong>{calendarDate.toLocaleDateString(webLocale(server), { month: "short", day: "numeric", year: "numeric" })}</strong>
+            {" · "}
+            <Link to="/stats?view=milestones">Milestone timeline</Link>
+          </div>
         </div>
+      </Card>
+      <Card title="Skill trend" subtitle="Hover points for details; per-period breakdown below the chart">
         {progression.data ? <TrendChart data={progression.data} /> : <LoadingInline />}
       </Card>
       <Card
-        title={
+        title="Activity"
+        subtitle={
           activity.data
-            ? `Activity (${formatDateRange(activity.data.from_date, activity.data.to_date, server)})`
-            : "Activity"
+            ? formatDateRange(activity.data.from_date, activity.data.to_date, server)
+            : "Summary for the selected activity window"
         }
       >
-        <p className="inline-meta" style={{ margin: "0 0 0.85rem" }}>
-          Only the <strong>date range</strong> below changes this graph. Play filters stay in <strong>Skill trend</strong>.
-        </p>
-        <div className="analytics-section-controls" style={{ marginBottom: "0.85rem" }}>
-          <DateRangePicker value={range} onChange={setRange} />
-        </div>
-        {activity.data ? <ActivityBars data={activity.data} /> : !customRangeReady ? <EmptyState text="Pick both custom dates to load activity." /> : <LoadingInline />}
-      </Card>
-      <Card
-        title="Calendar explorer"
-        subtitle="Open the shared year / month / week / day modal for the same filters used by the charts."
-        actions={
-          <div className="button-row tight">
-            <button className="button primary" type="button" onClick={() => setCalendarOpen(true)}>
-              Open calendar
-            </button>
-          </div>
-        }
-      >
-        <div className="stack">
-          <div className="inline-meta">
-            Current mode: <strong>{formatDifficulty(calMode)}</strong> · Anchor:{" "}
-            <strong>{calendarDate.toLocaleDateString(webLocale(server), { month: "long", day: "numeric", year: "numeric" })}</strong>
-          </div>
-          <div className="inline-meta">
-            Progress uses the same play filters as <strong>Skill trend</strong>. The modal loads month, year, and day data on demand instead of keeping a large explorer on the page.
-          </div>
-          <div className="button-row tight">
-            <Link to="/stats?view=milestones">Full milestone timeline</Link>
-          </div>
-        </div>
+        {activity.data ? (
+          <ActivitySummary data={activity.data} />
+        ) : !customRangeReady ? (
+          <EmptyState text="Pick both custom dates to load activity." />
+        ) : (
+          <LoadingInline />
+        )}
       </Card>
       <CalendarExplorerModal
         open={calendarOpen}

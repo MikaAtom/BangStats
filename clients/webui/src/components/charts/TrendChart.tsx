@@ -11,9 +11,9 @@ export function TrendChart({ data }: TrendChartProps) {
 
   const n = data.points.length;
   const vbW = 100;
-  const vbH = 34;
+  const vbH = 44;
   const padX = 6;
-  const padY = 5;
+  const padY = 7;
   const innerW = vbW - 2 * padX;
   const innerH = vbH - 2 * padY;
 
@@ -36,7 +36,6 @@ export function TrendChart({ data }: TrendChartProps) {
 
   return (
     <div className="stack trend-chart-synced">
-      <div className="inline-meta">Line: skill score per period · Hover dots for full stats</div>
       <div className="trend-chart-synced__plot">
         <svg
           viewBox={`0 0 ${vbW} ${vbH}`}
@@ -48,17 +47,14 @@ export function TrendChart({ data }: TrendChartProps) {
           <path d={path} className="trend-line" vectorEffect="non-scaling-stroke" />
           {points.map((point) => (
             <g key={point.label}>
-              <circle cx={point.x} cy={point.y} r="1.35" className="trend-dot" vectorEffect="non-scaling-stroke">
+              <circle cx={point.x} cy={point.y} r="1.55" className="trend-dot" vectorEffect="non-scaling-stroke">
                 <title>{`${point.label}: skill ${point.skill_score}, ${point.plays} plays, ${point.accuracy}% acc, ${point.fc} FC / ${point.ap} AP`}</title>
               </circle>
-              <text x={point.x} y={point.y - 2.8} textAnchor="middle" className="trend-value-label">
-                {point.skill_score}
-              </text>
             </g>
           ))}
         </svg>
       </div>
-      <div className="trend-chart-synced__columns" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}>
+      <div className="trend-chart-synced__columns" style={{ gridTemplateColumns: `repeat(${n}, minmax(5rem, 1fr))` }}>
         {points.map((point) => (
           <div key={point.label} className="trend-chart-synced__col">
             <span className="trend-axis-label">{point.label}</span>
