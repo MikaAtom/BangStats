@@ -183,6 +183,10 @@ function collectShiftSeries(limit: number, step: number) {
   return values;
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
 function getMeasuredTextBox(node: SVGTextElement | null): MeasuredTextBox | null {
   if (!node) return null;
   const bbox = node.getBBox();
@@ -345,37 +349,32 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
       const next = points[index + 1];
       const prefersBelow = point.isValley || (!prev && next && next.y < point.y) || (!next && prev && prev.y < point.y);
       const verticalDirection = prefersBelow ? 1 : -1;
-      const distanceBase = dotRadius + box.height / 2 + Math.max(lineWidth * 2.5, box.height * 0.2);
-      const distanceStep = Math.max(box.height * 0.65, dotRadius * 0.8, lineWidth * 2.5);
-      const maxDistance = Math.max(distanceBase + distanceStep * 5, innerH / 3);
-      const horizontalStep = Math.max(box.width / 3.2, dotRadius);
-      const horizontalLimit = Math.max(box.width * 0.9, innerW / Math.max(3, n - 1));
+      const baseDistance = dotRadius + box.height / 2 + Math.max(box.height * 0.35, lineWidth * 3);
+      const distanceStep = Math.max(box.height * 0.7, dotRadius * 0.85);
+      const horizontalStep = Math.max(box.width / 4, dotRadius * 0.9);
+      const horizontalLimit = Math.max(box.width * 0.75, innerW / Math.max(4, n));
       let placed: PlacedPointLabel | null = null;
 
-      let distance = distanceBase;
-      while (distance <= maxDistance + distanceStep * 0.5) {
+      for (const distance of [baseDistance, baseDistance + distanceStep, baseDistance + distanceStep * 2, baseDistance + distanceStep * 3]) {
         for (const horizontalShift of collectShiftSeries(horizontalLimit, horizontalStep)) {
-          const x = point.x + horizontalShift;
-          const y = point.y + verticalDirection * distance;
+          const x = clamp(point.x + horizontalShift, chartBounds.left + box.width / 2, chartBounds.right - box.width / 2);
+          const y = clamp(point.y + verticalDirection * distance, chartBounds.top - box.top, chartBounds.bottom - box.bottom);
           const rect = rectFromMeasured(box, x, y);
-          const inside = rectInsideBounds(rect, chartBounds);
           const blocked =
-            !inside ||
-            pointLabelRects.some((other) => overlaps(expandRect(rect, box.height * 0.2, box.height * 0.16), other)) ||
-            dotRects.some((other) => overlaps(expandRect(rect, box.height * 0.14, box.height * 0.14), other)) ||
-            guideRects.some((other) => overlaps(expandRect(rect, box.height * 0.12, box.height * 0.12), other)) ||
+            pointLabelRects.some((other) => overlaps(expandRect(rect, box.height * 0.22, box.height * 0.18), other)) ||
+            dotRects.some((other) => overlaps(expandRect(rect, box.height * 0.16, box.height * 0.16), other)) ||
+            guideRects.some((other) => overlaps(expandRect(rect, box.height * 0.08, box.height * 0.08), other)) ||
             lineBlocked(rect, box);
-          if (!blocked) {
+          if (!blocked && rectInsideBounds(rect, chartBounds)) {
             placed = { x, y, text: String(point.skill_score), rect };
             break;
           }
         }
         if (placed) break;
-        distance += distanceStep;
       }
 
       if (!placed) {
-        const fallbackRect = clampRectToBounds(rectFromMeasured(box, point.x, point.y + verticalDirection * distanceBase), chartBounds);
+        const fallbackRect = clampRectToBounds(rectFromMeasured(box, point.x, point.y + verticalDirection * baseDistance), chartBounds);
         placed = {
           x: fallbackRect.left - box.left,
           y: fallbackRect.top - box.top,
@@ -401,30 +400,38 @@ export function TrendChart({ data, variant = "default", server = "en" }: TrendCh
       const normal = normalize({ x: -tangent.y, y: tangent.x });
       const midpoint = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
       const segmentLength = Math.max(vectorLength({ x: end.x - start.x, y: end.y - start.y }), 1);
-      const normalBase = dotRadius + box.height / 2 + Math.max(lineWidth * 3, box.height * 0.28);
-      const normalStep = Math.max(box.height * 0.7, lineWidth * 3, dotRadius * 0.85);
-      const maxNormal = Math.max(normalBase + normalStep * 5, innerH / 3);
+      const normalBase = dotRadius + box.height / 2 + Math.max(lineWidth * 3, box.height * 0.4);
+      const normalStep = Math.max(box.height * 0.75, dotRadius * 0.8);
+      const maxNormal = Math.max(normalBase + normalStep * 4, innerH / 3);
       const tangentLimit = Math.max(0, segmentLength / 2 - Math.max(dotRadius * 1.6, box.width * 0.22));
       const tangentStep = Math.max(box.width / 3.8, dotRadius * 0.8);
-      const sideVectors = [normal, { x: -normal.x, y: -normal.y }].sort((a, b) => (midpoint.y + a.y * normalBase) - (midpoint.y + b.y * normalBase));
+      const upperSide = midpoint.y + normal.y * normalBase < midpoint.y + -normal.y * normalBase ? normal : { x: -normal.x, y: -normal.y };
+      const lowerSide = upperSide === normal ? { x: -normal.x, y: -normal.y } : normal;
+      const sideVectors = [upperSide, lowerSide];
       let placed: PlacedDeltaLabel | null = null;
 
       for (const side of sideVectors) {
         let normalDistance = normalBase;
         while (normalDistance <= maxNormal + normalStep * 0.5) {
           for (const tangentShift of collectShiftSeries(tangentLimit, tangentStep)) {
-            const x = midpoint.x + side.x * normalDistance + tangent.x * tangentShift;
-            const y = midpoint.y + side.y * normalDistance + tangent.y * tangentShift;
+            const x = clamp(
+              midpoint.x + side.x * normalDistance + tangent.x * tangentShift,
+              chartBounds.left + box.width / 2,
+              chartBounds.right - box.width / 2,
+            );
+            const y = clamp(
+              midpoint.y + side.y * normalDistance + tangent.y * tangentShift,
+              chartBounds.top - box.top,
+              chartBounds.bottom - box.bottom,
+            );
             const rect = rectFromMeasured(box, x, y);
-            const inside = rectInsideBounds(rect, chartBounds);
             const blocked =
-              !inside ||
               pointLabelRects.some((other) => overlaps(expandRect(rect, box.height * 0.24, box.height * 0.2), other)) ||
               deltaRects.some((other) => overlaps(expandRect(rect, box.height * 0.22, box.height * 0.18), other)) ||
               dotRects.some((other) => overlaps(expandRect(rect, box.height * 0.14, box.height * 0.14), other)) ||
               guideRects.some((other) => overlaps(expandRect(rect, box.height * 0.14, box.height * 0.14), other)) ||
               lineBlocked(rect, box);
-            if (!blocked) {
+            if (!blocked && rectInsideBounds(rect, chartBounds)) {
               placed = { key: `${point.label}-${next.label}`, x, y, label, rect };
               break;
             }
